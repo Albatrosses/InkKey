@@ -1,0 +1,8 @@
+<resources>
+    <string name="app_name">InkKey</string>
+    <string name="ime_name">InkKey Handwriting Keyboard</string>
+    <string name="subtype_handwriting">Handwriting &amp; NEET Math</string>
+    <string name="settings_title">InkKey Settings</string>
+</resources>
+
+
