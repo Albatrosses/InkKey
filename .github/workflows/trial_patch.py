@@ -8,10 +8,10 @@ def replace_once(code, old, new):
 
 gradle = root / 'app/build.gradle.kts'
 code = gradle.read_text()
-code = replace_once(code, 'applicationId = "com.aistudio.inkkey.vzqwx"', 'applicationId = "com.aistudio.inkkey.uppertrial3"')
-gradle.write_text(re.sub(r'versionName = "[^"]+"', 'versionName = "1.8-upper-trial-3"', code, count=1))
+code = replace_once(code, 'applicationId = "com.aistudio.inkkey.vzqwx"', 'applicationId = "com.aistudio.inkkey.uppertrial4"')
+gradle.write_text(re.sub(r'versionName = "[^"]+"', 'versionName = "1.8-upper-trial-4"', code, count=1))
 manifest = root / 'app/src/main/AndroidManifest.xml'
-code = manifest.read_text().replace('android:label="@string/app_name"', 'android:label="InkKey Upper Trial 3"')
+code = manifest.read_text().replace('android:label="@string/app_name"', 'android:label="InkKey Upper Trial 4"')
 code = re.sub(r'\s*<service\s+android:name="\.ime\.InkKeyInputMethodService"[\s\S]*?</service>', '', code, count=1)
 manifest.write_text(code)
 
@@ -31,6 +31,23 @@ handler = '''    private val upperRestartDetector = com.example.util.ContactRest
             TabletAction.LASSO -> ToolType.LASSO
             else -> null
         }
+
+    fun handleUpperTrialHover(event: MotionEvent) {
+        val dev = event.device ?: return
+        val eligible = dev.vendorId == 0x28BD && dev.productId == 0x0948 &&
+            event.pointerCount == 1 && event.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS &&
+            event.buttonState == 0 && event.actionButton == 0
+        if (event.pointerCount == 0) return
+        val edge = upperRestartDetector.observeHover(com.example.util.ContactRestartDetector.Sample(
+            event.actionMasked, event.eventTime, event.x, event.y, event.pressure, event.deviceId), eligible)
+        if (edge == com.example.util.ContactRestartDetector.Edge.PRESS_CANDIDATE) {
+            upperTrialLiftJob?.cancel()
+            val alreadyHeld = upperTrialHeld.pressed
+            upperTrialHeld.update(edge)
+            com.example.util.UpperTrialTrace.record("HOVER_PRESS_CANDIDATE time=${event.eventTime} selected=${_currentTool.value} override=$upperTrialToolOverride")
+            if (!alreadyHeld && upperTrialToolOverride == null && _tabletConfig.value.upperBarrelAction != TabletAction.NONE) executeTabletAction(_tabletConfig.value.upperBarrelAction)
+        }
+    }
 
     private fun clearUpperTrial() {
         upperTrialHeld.clear()
@@ -83,7 +100,7 @@ path.write_text(canvas)
 
 path = root / 'app/src/main/java/com/example/MainActivity.kt'
 activity = path.read_text()
-activity = replace_once(activity, 'override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {', 'override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {\n        com.example.util.UpperTrialTrace.motion(event, "GENERIC")')
+activity = replace_once(activity, 'override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {', 'override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {\n        com.example.util.UpperTrialTrace.motion(event, "GENERIC")\n        mainViewModel?.handleUpperTrialHover(event)')
 path.write_text(activity)
 
 path = root / 'app/src/main/java/com/example/ui/settings/SettingsScreen.kt'

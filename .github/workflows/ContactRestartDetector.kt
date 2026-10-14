@@ -5,8 +5,26 @@ class ContactRestartDetector {
     data class Sample(val action: Int, val time: Long, val x: Float, val y: Float, val pressure: Float, val deviceId: Int)
     enum class Edge { NONE, PRESS_CANDIDATE, RELEASE_CANDIDATE }
     private var pendingUp: Sample? = null
+    private var pendingHoverExit: Sample? = null
 
-    fun reset() { pendingUp = null }
+    fun reset() { pendingUp = null; pendingHoverExit = null }
+
+    /** Trial signature: recorded pre-held mode switches interrupt hover for 44–46 ms. */
+    fun observeHover(sample: Sample, eligible: Boolean): Edge {
+        if (!eligible) { pendingHoverExit = null; return Edge.NONE }
+        if (sample.action == 10) pendingHoverExit = sample // ACTION_HOVER_EXIT
+        if (sample.action == 9) { // ACTION_HOVER_ENTER
+            val previous = pendingHoverExit
+            pendingHoverExit = null
+            if (previous != null && previous.deviceId == sample.deviceId &&
+                sample.time - previous.time in 35L..55L &&
+                previous.pressure == 0f && sample.pressure == 0f &&
+                kotlin.math.hypot(sample.x - previous.x, sample.y - previous.y) <= 12f) {
+                return Edge.PRESS_CANDIDATE
+            }
+        }
+        return Edge.NONE
+    }
 
     fun observe(sample: Sample, eligible: Boolean): Edge {
         if (!eligible || !sample.pressure.isFinite() || !sample.x.isFinite() || !sample.y.isFinite()) {
@@ -16,6 +34,7 @@ class ContactRestartDetector {
             3 -> reset() // ACTION_CANCEL
             1 -> pendingUp = sample.takeIf { it.pressure > 0.02f } // Normal releases were 0.009949338.
             0 -> {
+                pendingHoverExit = null // Real touchdown must not become a hover mode switch.
                 val previous = pendingUp
                 reset()
                 if (previous == null || previous.deviceId != sample.deviceId) return Edge.NONE
