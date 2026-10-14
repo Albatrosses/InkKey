@@ -1,0 +1,32 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Ink fluid stroke curve -->
+    <path
+        android:strokeColor="#38BDF8"
+        android:strokeWidth="5"
+        android:strokeLineCap="round"
+        android:strokeLineJoin="round"
+        android:pathData="M24,76 C36,86 52,68 64,74 C74,79 84,72 88,64" />
+
+    <!-- Pen nib body -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,20 L68,44 L60,54 L62,70 L54,76 L46,70 L48,54 L40,44 Z" />
+
+    <!-- Pen nib tip & slit -->
+    <path
+        android:fillColor="#0284C7"
+        android:pathData="M54,54 L54,76 L52,76 L52,54 Z" />
+    <path
+        android:fillColor="#0284C7"
+        android:pathData="M53,52 A3,3 0 1 0 55,52 A3,3 0 1 0 53,52" />
+
+    <!-- Key teeth / wings accent on pen body -->
+    <path
+        android:fillColor="#FBBF24"
+        android:pathData="M40,44 L48,54 L44,56 L38,48 Z M68,44 L60,54 L64,56 L70,48 Z" />
+</vector>
+
