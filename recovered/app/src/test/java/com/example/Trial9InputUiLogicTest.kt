@@ -13,15 +13,16 @@ import org.junit.Test
 
 class Trial9InputUiLogicTest {
     @Test
-    fun recoveredXpPenShortcutsResolveOnlyVerifiedExpressIndices() {
+    fun recoveredXpPenShortcutsResolveVerifiedExpressIndices() {
         assertEquals(1, XpPenExpressKeyResolver.resolveKnownShortcut(KeyEvent.KEYCODE_B, false, false, false))
         assertEquals(2, XpPenExpressKeyResolver.resolveKnownShortcut(KeyEvent.KEYCODE_E, false, false, false))
         assertEquals(3, XpPenExpressKeyResolver.resolveKnownShortcut(KeyEvent.KEYCODE_ALT_LEFT, false, true, false))
         assertEquals(4, XpPenExpressKeyResolver.resolveKnownShortcut(KeyEvent.KEYCODE_SPACE, false, false, false))
         assertEquals(5, XpPenExpressKeyResolver.resolveKnownShortcut(KeyEvent.KEYCODE_S, true, false, false))
         assertEquals(6, XpPenExpressKeyResolver.resolveKnownShortcut(KeyEvent.KEYCODE_Z, true, false, false))
-        assertNull(XpPenExpressKeyResolver.resolveKnownShortcut(KeyEvent.KEYCODE_NUMPAD_ADD, true, false, false))
-        assertNull(XpPenExpressKeyResolver.resolveKnownShortcut(KeyEvent.KEYCODE_NUMPAD_SUBTRACT, true, false, false))
+        assertEquals(7, XpPenExpressKeyResolver.resolveCapturedScanCode(78))
+        assertEquals(8, XpPenExpressKeyResolver.resolveCapturedScanCode(74))
+        assertNull(XpPenExpressKeyResolver.resolveCapturedScanCode(0))
     }
 
     @Test
