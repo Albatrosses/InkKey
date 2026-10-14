@@ -1,7 +1,0 @@
-{
-  "name": "InkKey",
-  "description": "NEET student handwriting and diagram workspace with high-res export and seamless ChatGPT answer-checking workflow.",
-  "requestFramePermissions": [],
-  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
-}
-

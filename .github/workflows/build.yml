@@ -1,14 +1,11 @@
-name: InkKey Recovered Trial 14
+name: InkKey
 on:
   push:
-    branches: ["upper-barrel-probe-v18"]
+    branches: [main, upper-barrel-probe-v18]
   workflow_dispatch:
 jobs:
   build:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: recovered
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-java@v4
@@ -18,21 +15,41 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '9.3.1'
-      - name: Prepare debug signing and Android SDK
+      - name: Restore development signing key
+        uses: actions/cache@v4
+        with:
+          path: debug.keystore
+          key: inkkey-signing-v1
+      - name: Prepare signing and Android SDK
+        env:
+          SIGNING_KEY_BASE64: ${{ secrets.INKKEY_SIGNING_KEY_BASE64 }}
         run: |
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           cp .env.example .env
-          keytool -genkeypair -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-      - name: Test recovery and build APK
-        run: gradle testDebugUnitTest --tests com.example.ContactRestartDetectorTest --tests com.example.Trial7HoverDetectorTest --tests com.example.BarrelToolControllerTest --tests com.example.RecoveredInputTest --tests com.example.Trial9InputUiLogicTest --tests com.example.ShapeRecognizerTest --tests com.example.ShapeRecognitionRegressionTest --tests com.example.ExpressKeyMatchingRegressionTest --tests com.example.Trial13InputSymbolTest --tests com.example.SymbolHitTestTest --tests com.example.Trial14StateRegressionTest --tests com.example.SymbolControlTouchTest assembleDebug --no-daemon
+          if [ -n "$SIGNING_KEY_BASE64" ]; then
+            printf '%s' "$SIGNING_KEY_BASE64" | base64 --decode > debug.keystore
+          elif [ ! -f debug.keystore ]; then
+            keytool -genkeypair -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=InkKey,O=InkKey,C=IN"
+          fi
+      - name: Run all unit tests, lint, and build APK
+        env:
+          STORE_PASSWORD: ${{ secrets.INKKEY_STORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.INKKEY_KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.INKKEY_KEY_ALIAS }}
+        run: gradle testDebugUnitTest lintRelease assembleRelease --no-daemon
+      - name: Name installable APK
+        run: cp app/build/outputs/apk/release/app-release.apk InkKey-3.0.apk
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: InkKey-Recovered-Trial-14
-          path: recovered/app/build/outputs/apk/debug/*.apk
-      - name: Upload test reports
+          name: InkKey-3.0
+          path: InkKey-3.0.apk
+      - name: Upload verification reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: InkKey-Trial-14-Test-Reports
-          path: recovered/app/build/test-results/testDebugUnitTest/
+          name: InkKey-Verification
+          path: |
+            app/build/test-results/testDebugUnitTest/
+            app/build/reports/tests/testDebugUnitTest/
+            app/build/reports/lint-results-release.*
