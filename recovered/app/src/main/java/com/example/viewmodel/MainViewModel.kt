@@ -522,7 +522,7 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
 
     // Zoom & Pan
     fun setZoomScale(scale: Float) {
-        _zoomScale.value = scale.coerceIn(0.5f, 3.5f)
+        _zoomScale.value = scale.coerceIn(0.1f, 3f)
     }
 
     fun zoomIn() {

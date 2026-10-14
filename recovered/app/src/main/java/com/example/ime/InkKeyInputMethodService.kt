@@ -195,6 +195,10 @@ class InkKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewModel
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         val repo = com.example.ime.data.ImeDocumentRepository.getInstance(this)
+        val config = repo.tabletConfig.value
+        val index = config.findMatchingKeyIndex(keyCode, event.scanCode, event)
+        val xpPen = event.device?.name?.contains("ugtablet deco mini7 v2", true) == true
+        if (xpPen && index != null) return true
         val target = com.example.util.StylusHardwareDetector.classifyKeyEvent(keyCode, event.scanCode, event)
         if (target != com.example.util.StylusHardwareDetector.BarrelTarget.NONE) {
             if (target == com.example.util.StylusHardwareDetector.BarrelTarget.UPPER_BARREL) repo.triggerUpperBarrelFunction(false) else repo.triggerLowerBarrelFunction(false)
