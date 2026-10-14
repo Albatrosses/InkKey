@@ -7,20 +7,21 @@ import com.example.model.ShapeType
 import com.example.util.ShapeRecognizer
 import com.example.util.XpPenExpressKeyResolver
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class Trial9InputUiLogicTest {
     @Test
-    fun recoveredXpPenShortcutsResolveToOriginalExpressIndices() {
+    fun recoveredXpPenShortcutsResolveOnlyVerifiedExpressIndices() {
         assertEquals(1, XpPenExpressKeyResolver.resolveKnownShortcut(KeyEvent.KEYCODE_B, false, false, false))
         assertEquals(2, XpPenExpressKeyResolver.resolveKnownShortcut(KeyEvent.KEYCODE_E, false, false, false))
         assertEquals(3, XpPenExpressKeyResolver.resolveKnownShortcut(KeyEvent.KEYCODE_ALT_LEFT, false, true, false))
         assertEquals(4, XpPenExpressKeyResolver.resolveKnownShortcut(KeyEvent.KEYCODE_SPACE, false, false, false))
         assertEquals(5, XpPenExpressKeyResolver.resolveKnownShortcut(KeyEvent.KEYCODE_S, true, false, false))
         assertEquals(6, XpPenExpressKeyResolver.resolveKnownShortcut(KeyEvent.KEYCODE_Z, true, false, false))
-        assertEquals(7, XpPenExpressKeyResolver.resolveKnownShortcut(KeyEvent.KEYCODE_NUMPAD_ADD, true, false, false))
-        assertEquals(8, XpPenExpressKeyResolver.resolveKnownShortcut(KeyEvent.KEYCODE_NUMPAD_SUBTRACT, true, false, false))
+        assertNull(XpPenExpressKeyResolver.resolveKnownShortcut(KeyEvent.KEYCODE_NUMPAD_ADD, true, false, false))
+        assertNull(XpPenExpressKeyResolver.resolveKnownShortcut(KeyEvent.KEYCODE_NUMPAD_SUBTRACT, true, false, false))
     }
 
     @Test
