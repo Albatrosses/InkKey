@@ -13,12 +13,12 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.inkkey.recoveredtrial12"
+    applicationId = "com.aistudio.inkkey.recoveredtrial13"
 
     minSdk = 24
     targetSdk = 36
     versionCode = 8
-    versionName = "1.8-recovered-trial-12"
+    versionName = "1.8-recovered-trial-13"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }

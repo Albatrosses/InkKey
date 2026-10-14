@@ -100,11 +100,11 @@ class InkKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewModel
             }
 
             override fun dispatchKeyEvent(event: KeyEvent): Boolean {
-                return if (inputRepo.handleHardwareKeyEvent(event)) true else super.dispatchKeyEvent(event)
+                return if (com.example.util.InputOwnership.routeImeHardwareKey(isInputViewShown) { inputRepo.handleHardwareKeyEvent(event) }) true else super.dispatchKeyEvent(event)
             }
 
             override fun dispatchKeyEventPreIme(event: KeyEvent): Boolean {
-                return if (inputRepo.handleHardwareKeyEvent(event)) true else super.dispatchKeyEventPreIme(event)
+                return if (com.example.util.InputOwnership.routeImeHardwareKey(isInputViewShown) { inputRepo.handleHardwareKeyEvent(event) }) true else super.dispatchKeyEventPreIme(event)
             }
         }
         composeView.setViewTreeLifecycleOwner(this)
@@ -165,6 +165,7 @@ class InkKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewModel
 
     override fun onWindowShown() {
         super.onWindowShown()
+        com.example.util.UpperTrialTrace.record("SESSION IME_SHOWN")
         com.example.ime.data.ImeDocumentRepository.getInstance(this).reloadTabletConfig()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
@@ -172,6 +173,7 @@ class InkKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewModel
 
     override fun onWindowHidden() {
         super.onWindowHidden()
+        com.example.util.UpperTrialTrace.record("SESSION IME_HIDDEN")
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_PAUSE)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_STOP)
         // Reset any live transient stylus state when switching apps
@@ -205,18 +207,25 @@ class InkKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewModel
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) return super.onKeyDown(keyCode, event)
         val repo = com.example.ime.data.ImeDocumentRepository.getInstance(this)
-        if (repo.handleHardwareKeyEvent(event)) return true
+        val ownsInput = com.example.util.InputOwnership.imeOwnsHardwareInput(isInputViewShown)
+        val handled = com.example.util.InputOwnership.routeImeHardwareKey(ownsInput) { repo.handleHardwareKeyEvent(event) }
+        com.example.util.UpperTrialTrace.key(event, "IME_KEY_DOWN", handled, ownsInput)
+        if (handled) return true
         return super.onKeyDown(keyCode, event)
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) return super.onKeyUp(keyCode, event)
         val repo = com.example.ime.data.ImeDocumentRepository.getInstance(this)
-        if (repo.handleHardwareKeyEvent(event)) return true
+        val ownsInput = com.example.util.InputOwnership.imeOwnsHardwareInput(isInputViewShown)
+        val handled = com.example.util.InputOwnership.routeImeHardwareKey(ownsInput) { repo.handleHardwareKeyEvent(event) }
+        com.example.util.UpperTrialTrace.key(event, "IME_KEY_UP", handled, ownsInput)
+        if (handled) return true
         return super.onKeyUp(keyCode, event)
     }
 
     override fun onGenericMotionEvent(event: android.view.MotionEvent): Boolean {
+        if (!isInputViewShown) return super.onGenericMotionEvent(event)
         com.example.util.UpperTrialTrace.motion(event, "IME_SERVICE_GENERIC")
         if (com.example.ime.data.ImeDocumentRepository.getInstance(this).handleGenericMotionEvent(event)) return true
         return super.onGenericMotionEvent(event)

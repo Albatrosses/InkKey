@@ -97,7 +97,7 @@ class MainActivity : ComponentActivity() {
             }
         }
         window.decorView.post {
-            (window.decorView as? android.view.ViewGroup)?.descendantFocusability = android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS
+            (window.decorView as? android.view.ViewGroup)?.descendantFocusability = android.view.ViewGroup.FOCUS_AFTER_DESCENDANTS
             window.decorView.isFocusableInTouchMode = true
             window.decorView.requestFocus()
         }
@@ -118,9 +118,9 @@ class MainActivity : ComponentActivity() {
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.keyCode == KeyEvent.KEYCODE_BACK && mainViewModel?.tabletConfig?.value?.customKeyCodes?.values?.contains(KeyEvent.KEYCODE_BACK) != true) return super.dispatchKeyEvent(event)
         val vm = mainViewModel
-        if (vm != null && vm.handleHardwareKeyEvent(event.keyCode, event.scanCode, event)) {
-            return true
-        }
+        val handled = vm?.handleHardwareKeyEvent(event.keyCode, event.scanCode, event) == true
+        com.example.util.UpperTrialTrace.key(event, "MAIN_KEY", handled)
+        if (handled) return true
         return super.dispatchKeyEvent(event)
     }
 
@@ -139,6 +139,15 @@ override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
             return true
         }
         return super.dispatchGenericMotionEvent(event)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        mainViewModel?.reloadTabletConfig()
+        com.example.util.UpperTrialTrace.record("SESSION MAIN_RESUME")
+        window.decorView.post {
+            if (window.decorView.findFocus() == null) window.decorView.requestFocus()
+        }
     }
 
     override fun onPause() {

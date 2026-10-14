@@ -25,6 +25,7 @@ class BarrelInputRouter(config: () -> TabletConfig, execute: (TabletAction) -> U
         val deviceId: Int,
         val buttons: Int,
         val actionButton: Int,
+        val pressureBits: Int,
         val xBits: Int,
         val yBits: Int
     )
@@ -39,6 +40,7 @@ class BarrelInputRouter(config: () -> TabletConfig, execute: (TabletAction) -> U
         deviceId = event.deviceId,
         buttons = event.buttonState,
         actionButton = try { event.actionButton } catch (_: Exception) { 0 },
+        pressureBits = if (event.pointerCount > 0) java.lang.Float.floatToIntBits(event.pressure) else 0,
         xBits = if (event.pointerCount > 0) java.lang.Float.floatToIntBits(event.x) else 0,
         yBits = if (event.pointerCount > 0) java.lang.Float.floatToIntBits(event.y) else 0
     )

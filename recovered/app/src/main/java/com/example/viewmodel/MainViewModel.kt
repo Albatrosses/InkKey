@@ -180,6 +180,11 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         barrelInput.tools.refresh()
     }
 
+    fun reloadTabletConfig() {
+        _tabletConfig.value = TabletConfig.load(getApplication())
+        barrelInput.tools.refresh()
+    }
+
     fun clearTabletFeedback() {
         _tabletFeedbackMessage.value = null
     }
@@ -248,6 +253,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun handleGenericMotionEvent(event: MotionEvent): Boolean = barrelInput.hover(event)
 
     fun handleHardwareKeyEvent(keyCode: Int, scanCode: Int = 0, event: KeyEvent? = null): Boolean {
+        // The keyboard can change shared mappings without pausing this Activity.
+        val loadedConfig = TabletConfig.load(getApplication())
+        if (loadedConfig != _tabletConfig.value) {
+            _tabletConfig.value = loadedConfig
+            barrelInput.tools.refresh()
+        }
         val config = _tabletConfig.value
         val device = event?.device
         val isXpPen = com.example.util.XpPenExpressKeyResolver.isXpPen(event)
@@ -1002,6 +1013,18 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         if (id != null) {
             _currentTool.value = ToolType.SYMBOL_EDIT
         }
+    }
+
+    fun updateAnnotationText(id: String, text: String) {
+        if (text.isBlank()) return
+        val doc = _currentDocument.value
+        val index = _currentPageIndex.value
+        if (doc.pages.getOrNull(index)?.textAnnotations?.none { it.id == id && it.text != text } != false) return
+        saveUndoSnapshot()
+        _currentDocument.value = doc.copy(pages = doc.pages.map { page ->
+            if (page.pageIndex == index) page.copy(textAnnotations = page.textAnnotations.map { if (it.id == id) it.copy(text = text) else it }) else page
+        })
+        scheduleAutoSave()
     }
 
     fun moveAnnotation(id: String, newX: Float, newY: Float) {

@@ -1,6 +1,14 @@
 package com.example.ui.canvas
 
 import android.view.MotionEvent
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.IntSize
+import com.example.ui.components.SymbolTextEditDialog
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -81,6 +89,9 @@ fun HandwritingCanvas(
     onWritingStarted: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    var canvasSize by remember { mutableStateOf(IntSize.Zero) }
+    val density = LocalDensity.current
+    var editingSymbolId by remember { mutableStateOf<String?>(null) }
     val selectedAnnotationId by viewModel.selectedAnnotationId.collectAsState()
     val eraserSize by viewModel.eraserSize.collectAsState()
     val tabletConfig by viewModel.tabletConfig.collectAsState()
@@ -108,8 +119,13 @@ fun HandwritingCanvas(
 
     val selectedAnnotation = pageData.textAnnotations.find { it.id == selectedAnnotationId }
 
+    editingSymbolId?.let { id ->
+        pageData.textAnnotations.find { it.id == id }?.let { symbol ->
+            SymbolTextEditDialog(symbol.text, onSave = { viewModel.updateAnnotationText(id, it); editingSymbolId = null }, onDismiss = { editingSymbolId = null })
+        }
+    }
     Box(
-        modifier = modifier
+        modifier = modifier.onSizeChanged { canvasSize = it }
             .fillMaxSize()
             .pointerInteropFilter { motionEvent ->
                 val toolType = motionEvent.getToolType(0)
@@ -294,15 +310,7 @@ fun HandwritingCanvas(
                         // 1. If an annotation is already selected, check corner handles for resizing
                         if (selectedAnnotation != null && !effectiveHardwareEraser && effectiveTool != ToolType.LASSO) {
                             val activeSym = selectedAnnotation
-                            val textWidth = max(activeSym.text.length * activeSym.fontSize * 0.7f, 32f)
-                            val textHeight = activeSym.fontSize * 1.4f
-                            val corners = listOf(
-                                Offset(activeSym.x - 8f, activeSym.y - textHeight - 4f),
-                                Offset(activeSym.x + textWidth + 8f, activeSym.y - textHeight - 4f),
-                                Offset(activeSym.x - 8f, activeSym.y + 10f),
-                                Offset(activeSym.x + textWidth + 8f, activeSym.y + 10f)
-                            )
-                            val hitCorner = corners.any { hypot(it.x - canvasX, it.y - canvasY) < 28f }
+                            val hitCorner = activeSym.hitResizeHandle(canvasX, canvasY, zoomScale)
                             if (hitCorner) {
                                 viewModel.saveUndoSnapshot() // Save undo once at start of resize
                                 isResizingAnnotation = true
@@ -314,8 +322,8 @@ fun HandwritingCanvas(
 
                         // 2. Check if user tapped an existing symbol to select/edit it
                         if (!effectiveHardwareEraser && effectiveTool != ToolType.LASSO) {
-                            val hitAnnotation = pageData.textAnnotations.find { sym ->
-                                sym.hitTest(canvasX, canvasY, padding = 24f)
+                            val hitAnnotation = pageData.textAnnotations.findLast { sym ->
+                                sym.hitTest(canvasX, canvasY, padding = 8f / zoomScale.coerceAtLeast(0.1f))
                             }
 
                             if (hitAnnotation != null) {
@@ -479,29 +487,14 @@ fun HandwritingCanvas(
 
                 // Highlight selected symbol with dashed bounding box on canvas
                 if (isSelected) {
-                    val textWidth = max(textItem.text.length * textItem.fontSize * 0.7f, 32f)
-                    val textHeight = textItem.fontSize * 1.4f
-                    drawRect(
-                        color = Color(0x223B82F6),
-                        topLeft = Offset(textItem.x - 8f, textItem.y - textHeight - 4f),
-                        size = Size(textWidth + 16f, textHeight + 14f)
-                    )
-                    drawRect(
-                        color = Color(0xFF2563EB),
-                        topLeft = Offset(textItem.x - 8f, textItem.y - textHeight - 4f),
-                        size = Size(textWidth + 16f, textHeight + 14f),
-                        style = Stroke(
-                            width = 2f,
-                            pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f)
-                        )
-                    )
-                    // Draw 4 corner handles
-                    val corners = listOf(
-                        Offset(textItem.x - 8f, textItem.y - textHeight - 4f),
-                        Offset(textItem.x + textWidth + 8f, textItem.y - textHeight - 4f),
-                        Offset(textItem.x - 8f, textItem.y + 10f),
-                        Offset(textItem.x + textWidth + 8f, textItem.y + 10f)
-                    )
+                    val corners = textItem.selectionCorners().map { Offset(it.x, it.y) }
+                    val outline = androidx.compose.ui.graphics.Path().apply {
+                        moveTo(corners[0].x, corners[0].y)
+                        corners.drop(1).forEach { lineTo(it.x, it.y) }
+                        close()
+                    }
+                    drawPath(outline, Color(0x223B82F6))
+                    drawPath(outline, Color(0xFF2563EB), style = Stroke(width = 2f, pathEffect = PathEffect.dashPathEffect(floatArrayOf(8f, 6f), 0f)))
                     corners.forEach { corner ->
                         drawCircle(Color.White, radius = 5f, center = corner)
                         drawCircle(Color(0xFF2563EB), radius = 5f, center = corner, style = Stroke(2f))
@@ -576,18 +569,19 @@ fun HandwritingCanvas(
         if (selectedAnnotation != null) {
             val screenX = (selectedAnnotation.x * zoomScale + panOffset.x).roundToInt()
             val textHeight = selectedAnnotation.fontSize * 1.4f * zoomScale
-            val screenY = ((selectedAnnotation.y - textHeight - 55f) * zoomScale + panOffset.y).roundToInt().coerceAtLeast(10)
+            val screenY = (selectedAnnotation.y * zoomScale + panOffset.y - textHeight - 55f).roundToInt().coerceAtLeast(10)
+            val maxActionX = (canvasSize.width - with(density) { 300.dp.toPx() }).roundToInt().coerceAtLeast(10)
 
             Surface(
                 modifier = Modifier
-                    .offset { IntOffset(screenX.coerceAtLeast(10), screenY) }
+                    .offset { IntOffset(screenX.coerceIn(10, maxActionX), screenY) }
                     .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp)),
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surfaceContainerHighest,
                 shadowElevation = 6.dp
             ) {
                 Row(
-                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                    modifier = Modifier.widthIn(max = 300.dp).horizontalScroll(rememberScrollState()).padding(horizontal = 6.dp, vertical = 2.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(2.dp)
                 ) {
@@ -597,6 +591,8 @@ fun HandwritingCanvas(
                         color = MaterialTheme.colorScheme.primary,
                         modifier = Modifier.padding(horizontal = 6.dp)
                     )
+
+                    TextButton(onClick = { editingSymbolId = selectedAnnotation.id }) { Text("Edit") }
 
                     // Shrink size handle
                     IconButton(

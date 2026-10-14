@@ -252,6 +252,14 @@ fun KeyboardCanvasView(
     }
 
     // Selected Symbol drag tracking
+    var showSymbolTextEditor by remember { mutableStateOf(false) }
+    if (showSymbolTextEditor) {
+        currentPage.textAnnotations.find { it.id == selectedSymbolId }?.let { symbol ->
+            com.example.ui.components.SymbolTextEditDialog(symbol.text,
+                onSave = { repository.updateSelectedSymbolText(it); showSymbolTextEditor = false },
+                onDismiss = { showSymbolTextEditor = false })
+        }
+    }
     var isDraggingSymbol by remember { mutableStateOf(false) }
     var lastSymbolTouchPoint by remember { mutableStateOf<Offset?>(null) }
 
@@ -1181,6 +1189,8 @@ fun KeyboardCanvasView(
                         color = Color(0xFF92400E)
                     )
 
+                    TextButton(onClick = { showSymbolTextEditor = true }) { Text("Edit") }
+
                     // Font Size Minus
                     IconButton(
                         onClick = { repository.resizeSelectedSymbol(-4f) },
@@ -1349,13 +1359,13 @@ fun KeyboardCanvasView(
                                     if (activeTool != ToolType.HAND) retractTransientPanels()
 
                                     // 1. Symbol selection priority: tapping any placed symbol selects it and enables moving
-                                    if (activeTool != ToolType.HAND) {
+                                    if (activeTool !in listOf(ToolType.HAND, ToolType.AREA_ERASER, ToolType.STROKE_ERASER, ToolType.LASSO)) {
                                         val currentlySelected = currentPage.textAnnotations.find { it.id == selectedSymbolId }
                                         val hitSymbol = if (currentlySelected != null && hitTestSymbol(currentlySelected, canvasX, canvasY, padding = 12f)) {
                                             currentlySelected
                                         } else {
                                             currentPage.textAnnotations.findLast { sym ->
-                                                hitTestSymbol(sym, canvasX, canvasY, padding = 22f)
+                                                hitTestSymbol(sym, canvasX, canvasY, padding = 8f / zoomScale.coerceAtLeast(0.1f))
                                             }
                                         }
 
@@ -1412,6 +1422,12 @@ fun KeyboardCanvasView(
                                 }
 
                                 MotionEvent.ACTION_MOVE -> {
+                                    // Continue a symbol drag synchronously, without waiting for tool recomposition.
+                                    if (isDraggingSymbol && lastSymbolTouchPoint != null && repository.selectedSymbolId.value != null && activeTool != ToolType.HAND) {
+                                        repository.moveSelectedSymbol(canvasX - lastSymbolTouchPoint!!.x, canvasY - lastSymbolTouchPoint!!.y)
+                                        lastSymbolTouchPoint = Offset(canvasX, canvasY)
+                                        return@pointerInteropFilter true
+                                    }
                                     when (activeTool) {
                                         ToolType.HAND -> {
                                             lastSymbolTouchPoint?.let { prev ->

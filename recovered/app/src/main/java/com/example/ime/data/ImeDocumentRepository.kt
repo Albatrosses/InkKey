@@ -528,6 +528,19 @@ class ImeDocumentRepository private constructor(private val context: Context) {
         }
     }
 
+    fun updateSelectedSymbolText(text: String) {
+        if (text.isBlank()) return
+        val id = _selectedSymbolId.value ?: return
+        val doc = _document.value
+        val index = _currentPageIndex.value
+        if (doc.pages.getOrNull(index)?.textAnnotations?.none { it.id == id && it.text != text } != false) return
+        pushUndoSnapshot()
+        _document.value = doc.copy(pages = doc.pages.map { page ->
+            if (page.pageIndex == index) page.copy(textAnnotations = page.textAnnotations.map { if (it.id == id) it.copy(text = text) else it }) else page
+        })
+        persistDocument()
+    }
+
     fun moveSelectedSymbol(dx: Float, dy: Float) {
         val targetId = _selectedSymbolId.value ?: return
         val doc = _document.value

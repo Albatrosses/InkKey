@@ -6,8 +6,9 @@ class ContactRestartDetector {
     enum class Edge { NONE, PRESS_CANDIDATE, RELEASE_CANDIDATE }
     private var pendingUp: Sample? = null
     private var pendingHoverExit: Sample? = null
+    private var restartHoverTravel = 0f
 
-    fun reset() { pendingUp = null; pendingHoverExit = null }
+    fun reset() { pendingUp = null; pendingHoverExit = null; restartHoverTravel = 0f }
 
     /**
      * XP-Pen Deco Mini 7 V2 upper-barrel presses repeatedly restart hover after ~44–47 ms.
@@ -15,7 +16,12 @@ class ContactRestartDetector {
      * so timing is the primary signature and the movement cap is only a dropout guard.
      */
     fun observeHover(sample: Sample, eligible: Boolean): Edge {
-        if (!eligible) { pendingHoverExit = null; return Edge.NONE }
+        if (!eligible || !sample.x.isFinite() || !sample.y.isFinite() || !sample.pressure.isFinite()) { pendingHoverExit = null; return Edge.NONE }
+        pendingUp?.let { up ->
+            if (sample.deviceId == up.deviceId && sample.time - up.time in 0L..100L && sample.pressure == 0f) {
+                restartHoverTravel = maxOf(restartHoverTravel, kotlin.math.hypot(sample.x - up.x, sample.y - up.y))
+            }
+        }
         if (sample.action == 10) pendingHoverExit = sample // ACTION_HOVER_EXIT
         if (sample.action == 9) { // ACTION_HOVER_ENTER
             val previous = pendingHoverExit
@@ -38,16 +44,17 @@ class ContactRestartDetector {
         }
         when (sample.action) {
             3 -> reset() // ACTION_CANCEL
-            1 -> pendingUp = sample.takeIf { it.pressure > 0.02f } // Normal releases were 0.009949338.
+            1 -> { pendingUp = sample.takeIf { it.pressure > 0.02f }; restartHoverTravel = 0f } // Normal releases were 0.009949338.
             0 -> {
                 pendingHoverExit = null // Real touchdown must not become a hover mode switch.
                 val previous = pendingUp
+                val observedHoverTravel = restartHoverTravel
                 reset()
                 if (previous == null || previous.deviceId != sample.deviceId) return Edge.NONE
                 val gap = sample.time - previous.time
                 val distance = kotlin.math.hypot(sample.x - previous.x, sample.y - previous.y)
                 // During a restart the pen can keep moving along the stroke.
-                val movementAllowance = (12f + gap * 4f).coerceAtMost(160f)
+                val movementAllowance = maxOf(12f + gap * 4f, observedHoverTravel + 24f).coerceAtMost(160f)
                 if (gap !in 1L..100L || distance > movementAllowance || sample.pressure <= 0.02f) return Edge.NONE
                 val ratio = sample.pressure / previous.pressure
                 if (ratio >= 1.7f) return Edge.PRESS_CANDIDATE

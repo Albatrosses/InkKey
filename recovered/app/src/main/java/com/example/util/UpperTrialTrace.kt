@@ -10,6 +10,11 @@ object UpperTrialTrace {
     private val lines = ArrayDeque<String>()
     private var lastHover = 0L
 
+    fun key(event: android.view.KeyEvent, route: String, handled: Boolean, visible: Boolean? = null) {
+        if (!XpPenExpressKeyResolver.isXpPen(event)) return
+        record("route=$route time=${event.eventTime} key=${event.keyCode} scan=${event.scanCode} action=${event.action} meta=${event.metaState} handled=$handled visible=$visible device=${event.device?.name}")
+    }
+
     fun motion(event: android.view.MotionEvent, route: String) {
         val dev = event.device ?: return
         if (dev.vendorId != 0x28BD || dev.productId != 0x0948 || event.pointerCount == 0) return
@@ -27,7 +32,7 @@ object UpperTrialTrace {
 
     fun share(context: Context) {
         val file = File(context.cacheDir, "inkkey-upper-trial.txt")
-        file.writeText("InkKey Recovered Trial 7; root IME routing + moving-hover upper inference\n" + lines.joinToString("\n"))
+        file.writeText("InkKey ${com.example.BuildConfig.VERSION_NAME}; MAIN/IME ownership, key routes and upper inference\n" + lines.joinToString("\n"))
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"
