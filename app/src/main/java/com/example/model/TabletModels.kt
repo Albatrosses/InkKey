@@ -94,12 +94,12 @@ data class TabletConfig(
     val barrelButtonAction: TabletAction get() = lowerBarrelAction
 
     fun matchesExpressKey(keyIndex: Int, keyCode: Int, scanCode: Int, event: KeyEvent? = null): Boolean {
-        // 1. Check custom user binding (highest priority)
-        val cKey = customKeyCodes[keyIndex]
-        if (cKey != null && cKey != 0 && cKey == keyCode) return true
-
-        val cScan = customScanCodes[keyIndex]
-        if (cScan != null && cScan != 0 && cScan == scanCode) return true
+        // Learned identifiers must all match; a partial match must not fall through to defaults.
+        val cKey = customKeyCodes[keyIndex]?.takeIf { it != 0 }
+        val cScan = customScanCodes[keyIndex]?.takeIf { it != 0 }
+        if (cKey != null || cScan != null) {
+            return (cKey == null || cKey == keyCode) && (cScan == null || cScan == scanCode)
+        }
 
         val name = event?.device?.name?.lowercase(java.util.Locale.ROOT).orEmpty()
         if (name.contains("ugtablet deco mini7 v2") && (name.contains("keyboard") || name.contains("mouse"))) {
@@ -268,10 +268,12 @@ data class TabletConfig(
     }
 
     fun findMatchingKeyIndex(keyCode: Int, scanCode: Int, event: KeyEvent? = null): Int? {
-        for (i in 1..8) {
-            if (matchesExpressKey(i, keyCode, scanCode, event)) return i
-        }
-        return null
+        val learned = com.example.util.XpPenExpressKeyResolver.resolveCustomBinding(keyCode, scanCode, customKeyCodes, customScanCodes)
+        if (learned != null) return learned
+        val partialLearnedMatch = customKeyCodes.values.any { it != 0 && it == keyCode } ||
+            customScanCodes.values.any { it != 0 && it == scanCode }
+        if (partialLearnedMatch) return null
+        return (1..8).filter { matchesExpressKey(it, keyCode, scanCode, event) }.singleOrNull()
     }
 
     companion object {

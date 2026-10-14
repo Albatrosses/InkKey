@@ -40,4 +40,12 @@ class ExpressKeyMatchingRegressionTest {
     @Test fun conflictingLearnedBindingsAreNotGuessed() {
         assertNull(Keys.resolveCustomBinding(KeyEvent.KEYCODE_B,48,mapOf(1 to KeyEvent.KEYCODE_B,2 to KeyEvent.KEYCODE_B),emptyMap()))
     }
+    @Test fun genericTabletFallbackCannotAcceptPartialOrAmbiguousLearnedPairs() {
+        val config = com.example.model.TabletConfig(customKeyCodes=mapOf(5 to KeyEvent.KEYCODE_S), customScanCodes=mapOf(5 to 31))
+        assertFalse(config.matchesExpressKey(5, KeyEvent.KEYCODE_S, 44))
+        assertNull(config.findMatchingKeyIndex(KeyEvent.KEYCODE_S, 44))
+        assertEquals(5, config.findMatchingKeyIndex(KeyEvent.KEYCODE_S, 31))
+        val duplicates = config.copy(customKeyCodes=mapOf(1 to KeyEvent.KEYCODE_B, 2 to KeyEvent.KEYCODE_B),customScanCodes=emptyMap())
+        assertNull(duplicates.findMatchingKeyIndex(KeyEvent.KEYCODE_B, 48))
+    }
 }

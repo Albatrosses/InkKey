@@ -291,14 +291,6 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             }
             return true
         }
-        if (target != com.example.util.StylusHardwareDetector.BarrelTarget.NONE) {
-            val down = event == null || event.action == KeyEvent.ACTION_DOWN
-            if (!down || event == null || event.repeatCount == 0) {
-                if (target == com.example.util.StylusHardwareDetector.BarrelTarget.UPPER_BARREL) triggerUpperBarrelFunction(down)
-                else triggerLowerBarrelFunction(down)
-            }
-            return true
-        }
         if (event != null && isXpPen && com.example.util.XpPenExpressKeyResolver.isCompositePrefix(event)) {
             return true
         }
