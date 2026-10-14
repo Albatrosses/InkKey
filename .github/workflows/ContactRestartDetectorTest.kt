@@ -122,4 +122,21 @@ class ContactRestartDetectorTest {
         detector.observe(ContactRestartDetector.Sample(1, 100L, 10f, 10f, 0.3f, 12), true)
         assertEquals(ContactRestartDetector.Edge.NONE, detector.observe(ContactRestartDetector.Sample(0, 112L, 10f, 10f, 0.7f, 13), true))
     }
+    @Test fun heldStateRestoresOnReleaseAndDoesNotToggleOnRepeatedPress() {
+        val held = com.example.util.HeldBarrelState()
+        held.update(ContactRestartDetector.Edge.PRESS_CANDIDATE)
+        held.update(ContactRestartDetector.Edge.PRESS_CANDIDATE)
+        assertEquals(true, held.pressed)
+        held.update(ContactRestartDetector.Edge.RELEASE_CANDIDATE)
+        assertEquals(false, held.pressed)
+        held.update(ContactRestartDetector.Edge.PRESS_CANDIDATE)
+        held.clear()
+        assertEquals(false, held.pressed)
+    }
+    @Test fun movingPenReleaseIsNotLostAcrossTheRecordedRestart() {
+        val detector = ContactRestartDetector()
+        detector.observe(ContactRestartDetector.Sample(1, 96662747L, 0f, 0f, 0.20661661f, 12), true)
+        assertEquals(ContactRestartDetector.Edge.RELEASE_CANDIDATE, detector.observe(ContactRestartDetector.Sample(0, 96662805L, 16.66724f, 0f, 0.06695965f, 12), true))
+    }
+
 }

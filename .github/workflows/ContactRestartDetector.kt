@@ -21,7 +21,9 @@ class ContactRestartDetector {
                 if (previous == null || previous.deviceId != sample.deviceId) return Edge.NONE
                 val gap = sample.time - previous.time
                 val distance = kotlin.math.hypot(sample.x - previous.x, sample.y - previous.y)
-                if (gap !in 1L..100L || distance > 12f || sample.pressure <= 0.02f) return Edge.NONE
+                // During a restart the pen can keep moving along the stroke.
+                val movementAllowance = (12f + gap * 4f).coerceAtMost(160f)
+                if (gap !in 1L..100L || distance > movementAllowance || sample.pressure <= 0.02f) return Edge.NONE
                 val ratio = sample.pressure / previous.pressure
                 if (ratio >= 1.7f) return Edge.PRESS_CANDIDATE
                 if (ratio <= 0.65f) return Edge.RELEASE_CANDIDATE
@@ -29,4 +31,18 @@ class ContactRestartDetector {
         }
         return Edge.NONE
     }
+}
+
+/** Transient state; repeated press candidates never toggle the selected tool. */
+class HeldBarrelState {
+    var pressed: Boolean = false
+        private set
+    fun update(edge: ContactRestartDetector.Edge) {
+        when (edge) {
+            ContactRestartDetector.Edge.PRESS_CANDIDATE -> pressed = true
+            ContactRestartDetector.Edge.RELEASE_CANDIDATE -> pressed = false
+            ContactRestartDetector.Edge.NONE -> Unit
+        }
+    }
+    fun clear() { pressed = false }
 }
