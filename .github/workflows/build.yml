@@ -1,7 +1,7 @@
-name: InkKey Recovered Trial 6
+name: InkKey Recovered Trial 7
 on:
   push:
-    branches: ["upper-barrel-probe-v18"]
+    branches: ["upper-barrel-probe-v19"]
   workflow_dispatch:
 jobs:
   build:
@@ -23,16 +23,18 @@ jobs:
           yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
           cp .env.example .env
           keytool -genkeypair -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+      - name: Apply Trial 7 input patch
+        run: python ../.github/workflows/trial7_patch.py
       - name: Test input recovery and build APK
-        run: gradle testDebugUnitTest --tests com.example.ContactRestartDetectorTest --tests com.example.BarrelToolControllerTest --tests com.example.RecoveredInputTest assembleDebug --no-daemon
+        run: gradle testDebugUnitTest --tests com.example.ContactRestartDetectorTest --tests com.example.Trial7DetectorRegressionTest --tests com.example.BarrelToolControllerTest --tests com.example.RecoveredInputTest assembleDebug --no-daemon
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: InkKey-Recovered-Trial-6
+          name: InkKey-Recovered-Trial-7
           path: recovered/app/build/outputs/apk/debug/*.apk
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: InkKey-Input-Test-Reports
+          name: InkKey-Input-Test-Reports-Trial-7
           path: recovered/app/build/test-results/testDebugUnitTest/
