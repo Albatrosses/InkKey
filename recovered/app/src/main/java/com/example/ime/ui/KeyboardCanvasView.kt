@@ -82,6 +82,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -118,11 +119,15 @@ import com.example.model.DrawingPoint
 import com.example.model.DrawingStroke
 import com.example.model.NeetSubject
 import com.example.model.PaperStyle
+import com.example.model.ShapeType
+import com.example.model.TabletAction
 import com.example.model.TextAnnotation
 import com.example.model.ToolType
 import com.example.model.ToolbarToolItem
+import com.example.util.ShapeRecognizer
 import java.io.File
 import java.io.FileOutputStream
+import kotlinx.coroutines.delay
 import kotlin.math.hypot
 import kotlin.math.max
 
@@ -175,6 +180,8 @@ fun KeyboardCanvasView(
     val toolbarItems by repository.toolbarItems.collectAsState()
     val canUndo by repository.canUndo.collectAsState()
     val canRedo by repository.canRedo.collectAsState()
+    val tabletConfig by repository.tabletConfig.collectAsState()
+    val tabletFeedback by repository.tabletFeedbackMessage.collectAsState()
 
     val currentPage = document.pages.getOrElse(currentPageIndex) {
         document.pages.firstOrNull() ?: com.example.model.PageData(0)
@@ -197,10 +204,52 @@ fun KeyboardCanvasView(
     var showToolbarCustomizeDialog by remember { mutableStateOf(false) }
     var showEraserSizePicker by remember { mutableStateOf(false) }
     var showSymbolsDrawer by remember { mutableStateOf(false) }
+    var showTabletQuickBar by remember { mutableStateOf(false) }
     var selectedSymbolCategory by remember { mutableStateOf("Physics") }
     var symbolPlacementMode by remember { mutableStateOf(false) } // false: places movable object on canvas; true: types symbol into chat
 
     var notificationMessage by remember { mutableStateOf<String?>(null) }
+    var shapeSnappingEnabled by remember { mutableStateOf(false) }
+
+    fun retractTransientPanels() {
+        showColorPicker = false
+        showWidthPicker = false
+        showPaperMenu = false
+        showSubjectMenu = false
+        showEraserSizePicker = false
+        showSymbolsDrawer = false
+        showTabletQuickBar = false
+        notificationMessage = null
+    }
+
+    val hasTransientPanel = showColorPicker || showWidthPicker || showPaperMenu ||
+        showSubjectMenu || showEraserSizePicker || showSymbolsDrawer || showTabletQuickBar ||
+        notificationMessage != null
+
+    LaunchedEffect(hasTransientPanel, notificationMessage) {
+        if (hasTransientPanel) {
+            delay(2000L)
+            retractTransientPanels()
+        }
+    }
+
+    LaunchedEffect(Unit) {
+        repository.uiTabletActions.collect { action ->
+            when (action) {
+                TabletAction.ZOOM_IN -> zoomScale = (zoomScale * 1.25f).coerceAtMost(3.0f)
+                TabletAction.ZOOM_OUT -> zoomScale = (zoomScale / 1.25f).coerceAtLeast(0.6f)
+                TabletAction.RESET_ZOOM -> {
+                    zoomScale = 1f
+                    panOffset = DrawingPoint(0f, 0f)
+                }
+                TabletAction.TOGGLE_TOOLBAR -> showTabletQuickBar = !showTabletQuickBar
+                TabletAction.TOGGLE_FULLSCREEN -> {
+                    notificationMessage = "Fullscreen action is available in the main InkKey workspace"
+                }
+                else -> Unit
+            }
+        }
+    }
 
     // Selected Symbol drag tracking
     var isDraggingSymbol by remember { mutableStateOf(false) }
@@ -454,6 +503,19 @@ fun KeyboardCanvasView(
                     Icon(Icons.Default.Tune, contentDescription = "Customize Toolbar Layout", modifier = Modifier.size(16.dp))
                 }
 
+                // Tablet quick controls restored from the clean APK behavior.
+                IconButton(
+                    onClick = { showTabletQuickBar = !showTabletQuickBar },
+                    modifier = Modifier.size(28.dp).testTag("ime_tablet_quick_toggle")
+                ) {
+                    Icon(
+                        Icons.Default.Brush,
+                        contentDescription = "Tablet Quick Controls",
+                        tint = if (showTabletQuickBar) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.size(16.dp)
+                    )
+                }
+
                 // Direct Settings Button (Starts ImeSettingsActivity cleanly)
                 IconButton(
                     onClick = {
@@ -469,6 +531,51 @@ fun KeyboardCanvasView(
                     modifier = Modifier.size(28.dp).testTag("ime_toolbar_settings_btn")
                 ) {
                     Icon(Icons.Default.Settings, contentDescription = "Keyboard Settings", modifier = Modifier.size(16.dp))
+                }
+            }
+
+            AnimatedVisibility(visible = showTabletQuickBar) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                        .horizontalScroll(rememberScrollState())
+                        .padding(horizontal = 6.dp, vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(3.dp)
+                ) {
+                    Text("Tablet", fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    TextButton(
+                        onClick = { repository.updateTabletConfig(tabletConfig.copy(stylusOnlyDrawing = !tabletConfig.stylusOnlyDrawing)) },
+                        modifier = Modifier.height(28.dp)
+                    ) { Text("Stylus ${if (tabletConfig.stylusOnlyDrawing) "Only" else "All"}", fontSize = 9.sp) }
+                    TextButton(
+                        onClick = { repository.updateTabletConfig(tabletConfig.copy(pressureEnabled = !tabletConfig.pressureEnabled)) },
+                        modifier = Modifier.height(28.dp)
+                    ) { Text("Pressure ${if (tabletConfig.pressureEnabled) "On" else "Off"}", fontSize = 9.sp) }
+                    TextButton(
+                        onClick = { repository.updateTabletConfig(tabletConfig.copy(stabilizationEnabled = !tabletConfig.stabilizationEnabled)) },
+                        modifier = Modifier.height(28.dp)
+                    ) { Text("Stabilize ${if (tabletConfig.stabilizationEnabled) "On" else "Off"}", fontSize = 9.sp) }
+                    TextButton(
+                        onClick = { repository.updateTabletConfig(tabletConfig.copy(swapBarrelButtons = !tabletConfig.swapBarrelButtons)) },
+                        modifier = Modifier.height(28.dp)
+                    ) { Text("Swap ${if (tabletConfig.swapBarrelButtons) "On" else "Off"}", fontSize = 9.sp) }
+                    Text("L: ${tabletConfig.lowerBarrelAction.displayName.removePrefix("Switch to ")}", fontSize = 9.sp)
+                    Text("U: ${tabletConfig.upperBarrelAction.displayName.removePrefix("Switch to ")}", fontSize = 9.sp)
+                    tabletFeedback?.let { feedback ->
+                        Text(feedback, fontSize = 9.sp, color = MaterialTheme.colorScheme.primary, fontWeight = FontWeight.SemiBold)
+                    }
+                    TextButton(
+                        onClick = {
+                            try {
+                                context.startActivity(Intent(context, com.example.ui.settings.ImeSettingsActivity::class.java).apply {
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                })
+                            } catch (_: Exception) { }
+                        },
+                        modifier = Modifier.height(28.dp)
+                    ) { Text("Full Settings", fontSize = 9.sp) }
                 }
             }
 
@@ -760,11 +867,21 @@ fun KeyboardCanvasView(
                         ToolbarToolItem.SHAPE -> {
                             FilledTonalIconButton(
                                 onClick = {
-                                    notificationMessage = "Shape snapping active while drawing diagrams!"
+                                    shapeSnappingEnabled = !shapeSnappingEnabled
+                                    retractTransientPanels()
+                                    notificationMessage = if (shapeSnappingEnabled) {
+                                        "Shape auto-detect ON"
+                                    } else {
+                                        "Shape auto-detect OFF"
+                                    }
                                 },
-                                modifier = Modifier.size(32.dp)
+                                modifier = Modifier.size(32.dp).testTag("ime_shape_snap_btn"),
+                                colors = IconButtonDefaults.filledTonalIconButtonColors(
+                                    containerColor = if (shapeSnappingEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceContainerHighest,
+                                    contentColor = if (shapeSnappingEnabled) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
+                                )
                             ) {
-                                Icon(Icons.Default.Category, contentDescription = "Shapes", modifier = Modifier.size(16.dp))
+                                Icon(Icons.Default.Category, contentDescription = "Shape auto-detect", modifier = Modifier.size(16.dp))
                             }
                         }
 
@@ -1223,11 +1340,14 @@ fun KeyboardCanvasView(
                             val canvasY = (rawY - panOffset.y) / zoomScale
                             val pressure = motionEvent.pressure
 
-                            repository.handleTouchMotionEvent(motionEvent)
+                            // Routed once at the IME root before Compose dispatch.
                             val activeTool = repository.transientBarrelTool.value ?: currentTool
 
                             when (motionEvent.actionMasked) {
                                 MotionEvent.ACTION_DOWN -> {
+                                    // Writing immediately retracts transient drawers/banners so the canvas gets its space back.
+                                    if (activeTool != ToolType.HAND) retractTransientPanels()
+
                                     // 1. Symbol selection priority: tapping any placed symbol selects it and enables moving
                                     if (activeTool != ToolType.HAND) {
                                         val currentlySelected = currentPage.textAnnotations.find { it.id == selectedSymbolId }
@@ -1359,7 +1479,14 @@ fun KeyboardCanvasView(
                                     } else {
                                         liveStroke?.let { finished ->
                                             if (finished.points.size >= 2) {
-                                                repository.addStroke(finished)
+                                                val storedStroke = if (shapeSnappingEnabled) {
+                                                    ShapeRecognizer.recognizeAndSnap(
+                                                        finished.copy(isShape = true, shapeType = ShapeType.NONE)
+                                                    )
+                                                } else {
+                                                    finished
+                                                }
+                                                repository.addStroke(storedStroke)
                                             }
                                         }
                                         liveStroke = null

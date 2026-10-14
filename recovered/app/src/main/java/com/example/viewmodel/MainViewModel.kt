@@ -250,11 +250,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun handleHardwareKeyEvent(keyCode: Int, scanCode: Int = 0, event: KeyEvent? = null): Boolean {
         val config = _tabletConfig.value
         val device = event?.device
-        val keyIndex = config.findMatchingKeyIndex(keyCode, scanCode, event)
+        val isXpPen = com.example.util.XpPenExpressKeyResolver.isXpPen(event)
+        val knownXpIndex = event?.let { com.example.util.XpPenExpressKeyResolver.resolve(it) }
+        val customIndex = com.example.util.XpPenExpressKeyResolver.resolveCustomBinding(keyCode, scanCode, config.customKeyCodes, config.customScanCodes)
+        val fallbackIndex = if (isXpPen) null else config.findMatchingKeyIndex(keyCode, scanCode, event)
+        val keyIndex = customIndex ?: knownXpIndex ?: fallbackIndex
         val target = com.example.util.StylusHardwareDetector.classifyKeyEvent(keyCode, scanCode, event)
-        val isXpPen = device?.name?.contains("ugtablet deco mini7 v2", ignoreCase = true) == true
-        val custom = config.customKeyCodes.values.any { it != 0 && it == keyCode } ||
-            config.customScanCodes.values.any { it != 0 && it == scanCode }
+        val custom = customIndex != null
         val express = keyIndex != null && (isXpPen || custom || target == com.example.util.StylusHardwareDetector.BarrelTarget.NONE)
         _latestDebugEvent.value = HardwareInputDebugEvent(
             eventType = "Key ${if (event?.action == KeyEvent.ACTION_UP) "UP" else "DOWN"}",
@@ -275,6 +277,24 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             if (!down || event == null || event.repeatCount == 0) {
                 if (target == com.example.util.StylusHardwareDetector.BarrelTarget.UPPER_BARREL) triggerUpperBarrelFunction(down)
                 else triggerLowerBarrelFunction(down)
+            }
+            return true
+        }
+        if (target != com.example.util.StylusHardwareDetector.BarrelTarget.NONE) {
+            val down = event == null || event.action == KeyEvent.ACTION_DOWN
+            if (!down || event == null || event.repeatCount == 0) {
+                if (target == com.example.util.StylusHardwareDetector.BarrelTarget.UPPER_BARREL) triggerUpperBarrelFunction(down)
+                else triggerLowerBarrelFunction(down)
+            }
+            return true
+        }
+        if (event != null && isXpPen && com.example.util.XpPenExpressKeyResolver.isCompositePrefix(event)) {
+            return true
+        }
+        if (event != null && isXpPen) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                val rawName = KeyEvent.keyCodeToString(event.keyCode).removePrefix("KEYCODE_")
+                _tabletFeedbackMessage.value = "XP-Pen unmapped: $rawName · scan ${event.scanCode}"
             }
             return true
         }

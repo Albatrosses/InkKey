@@ -8,6 +8,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -40,6 +41,7 @@ import androidx.compose.material.icons.filled.DeleteSweep
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.Functions
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PanTool
 import androidx.compose.material.icons.filled.Settings
@@ -73,8 +75,11 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -83,6 +88,7 @@ import com.example.model.ShapeType
 import com.example.model.ToolType
 import com.example.model.ToolbarToolItem
 import com.example.viewmodel.MainViewModel
+import kotlin.math.abs
 
 private val PEN_COLORS: List<Pair<Long, String>> = listOf(
     0xFF0F172AL to "Charcoal",
@@ -120,7 +126,14 @@ fun VerticalDrawingToolbar(
     palmRejectionEnabled: Boolean,
     selectedStrokesCount: Int,
     isCollapsed: Boolean,
+    isFullScreen: Boolean = false,
+    dockOnRight: Boolean = false,
     onToggleCollapse: () -> Unit,
+    onExitFullScreen: () -> Unit = {},
+    onDockSideChange: (Boolean) -> Unit = {},
+    onVerticalDrag: (Float) -> Unit = {},
+    lensSourceXPx: Float = 0f,
+    lensSourceYPx: Float = 0f,
     onOpenMathPalette: () -> Unit,
     onAddTextPrompt: () -> Unit,
     modifier: Modifier = Modifier
@@ -131,6 +144,11 @@ fun VerticalDrawingToolbar(
     val canRedo by viewModel.canRedo.collectAsState()
     val currentDoc by viewModel.currentDocument.collectAsState()
     val currentPageIndex by viewModel.currentPageIndex.collectAsState()
+    val lensPanOffset by viewModel.panOffset.collectAsState()
+    val lensLiveStroke by viewModel.liveStroke.collectAsState()
+    val lensPage = currentDoc.pages.getOrElse(currentPageIndex) {
+        currentDoc.pages.firstOrNull() ?: com.example.model.PageData(0)
+    }
 
     var showColorPicker by remember { mutableStateOf(false) }
     var showWidthPicker by remember { mutableStateOf(false) }
@@ -141,28 +159,23 @@ fun VerticalDrawingToolbar(
     var showClearPageConfirmDialog by remember { mutableStateOf(false) }
     var showDeletePageConfirmDialog by remember { mutableStateOf(false) }
 
+    var handleHorizontalDrag by remember { mutableStateOf(0f) }
+
     if (isCollapsed) {
-        // Floating handle when toolbar is hidden/collapsed
-        Surface(
-            modifier = modifier.testTag("vertical_toolbar_collapsed_handle"),
-            shape = RoundedCornerShape(topEnd = 16.dp, bottomEnd = 16.dp),
-            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.94f),
-            shadowElevation = 6.dp
-        ) {
-            IconButton(
-                onClick = onToggleCollapse,
-                modifier = Modifier
-                    .size(42.dp)
-                    .testTag("open_vertical_toolbar_button")
-            ) {
-                Icon(
-                    imageVector = Icons.Default.ChevronRight,
-                    contentDescription = "Open Drawing Toolbar",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(22.dp)
-                )
-            }
-        }
+        GlassLensHandle(
+            pageData = lensPage,
+            paperStyle = currentDoc.paperStyle,
+            panOffset = lensPanOffset,
+            zoomScale = zoomScale,
+            liveStroke = lensLiveStroke,
+            sourceCenterXPx = lensSourceXPx,
+            sourceCenterYPx = lensSourceYPx,
+            dockOnRight = dockOnRight,
+            onOpen = onToggleCollapse,
+            onDockSideChange = onDockSideChange,
+            onVerticalDrag = onVerticalDrag,
+            modifier = modifier
+        )
     } else {
         // Full Vertical Tool Palette along the canvas edge
         Surface(
@@ -171,7 +184,7 @@ fun VerticalDrawingToolbar(
                 .testTag("drawing_toolbar"),
             shape = RoundedCornerShape(20.dp),
             shadowElevation = 6.dp,
-            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.96f)
+            color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.72f)
         ) {
             Column(
                 modifier = Modifier
@@ -188,11 +201,28 @@ fun VerticalDrawingToolbar(
                         .testTag("collapse_vertical_toolbar_button")
                 ) {
                     Icon(
-                        imageVector = Icons.Default.ChevronLeft,
+                        imageVector = if (dockOnRight) Icons.Default.ChevronRight else Icons.Default.ChevronLeft,
                         contentDescription = "Collapse Toolbar",
                         tint = MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier = Modifier.size(20.dp)
                     )
+                }
+
+                // In fullscreen, exit lives in this slide toolbar instead of a separate floating button.
+                if (isFullScreen) {
+                    IconButton(
+                        onClick = onExitFullScreen,
+                        modifier = Modifier
+                            .size(36.dp)
+                            .testTag("toolbar_exit_fullscreen_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.FullscreenExit,
+                            contentDescription = "Exit Full Screen",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(21.dp)
+                        )
+                    }
                 }
 
                 // Main Tool Items vertically arranged

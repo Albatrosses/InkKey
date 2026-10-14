@@ -2,14 +2,15 @@ package com.example.ui.components
 
 import android.graphics.Paint as AndroidPaint
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.matchParentSize
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.GenericShape
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
@@ -32,6 +33,8 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.nativeCanvas
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.unit.dp
 import com.example.model.DrawingPoint
 import com.example.model.DrawingStroke
@@ -43,7 +46,7 @@ import kotlin.math.abs
 /**
  * Theme-independent collapsed edge handle. It redraws the page under the handle
  * at a slight magnification so it behaves visually like a clear water droplet.
- * The optical rim and chevron use exactly the same styling on every paper theme.
+ * The borderless reflection uses the same styling on every paper theme.
  */
 @Composable
 fun GlassLensHandle(
@@ -61,20 +64,21 @@ fun GlassLensHandle(
     modifier: Modifier = Modifier
 ) {
     var horizontalDrag by remember { mutableFloatStateOf(0f) }
-    val glassShape = if (dockOnRight) {
-        RoundedCornerShape(topStart = 24.dp, bottomStart = 24.dp, topEnd = 5.dp, bottomEnd = 5.dp)
-    } else {
-        RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp, topStart = 5.dp, bottomStart = 5.dp)
+    val glassShape = remember {
+        GenericShape { size, _ ->
+            moveTo(size.width * 0.5f, 0f)
+            cubicTo(size.width * 0.30f, size.height * 0.32f, 0f, size.height * 0.55f, 0f, size.height * 0.76f)
+            cubicTo(0f, size.height * 1.06f, size.width, size.height * 1.06f, size.width, size.height * 0.76f)
+            cubicTo(size.width, size.height * 0.55f, size.width * 0.70f, size.height * 0.32f, size.width * 0.5f, 0f)
+            close()
+        }
     }
-    val rimColor = Color(0xFF7C8AA5).copy(alpha = 0.52f)
-    val causticColor = Color(0xFF94A3B8).copy(alpha = 0.34f)
-    val chevronColor = Color(0xFF74839B).copy(alpha = 0.88f)
+    val interaction = remember { MutableInteractionSource() }
 
     Box(
         modifier = modifier
-            .width(34.dp)
-            .height(112.dp)
-            .clip(glassShape)
+            .width(36.dp)
+            .height(96.dp)
             .pointerInput(dockOnRight) {
                 detectDragGestures(
                     onDragStart = { horizontalDrag = 0f },
@@ -90,12 +94,14 @@ fun GlassLensHandle(
                     onVerticalDrag(dragAmount.y)
                 }
             }
-            .clickable(onClick = onOpen)
-            .border(width = 1.dp, color = rimColor, shape = glassShape)
+            .clickable(interactionSource = interaction, indication = null, onClick = onOpen)
+            .semantics { contentDescription = "Open drawing toolbar" }
             .testTag("vertical_toolbar_collapsed_handle"),
         contentAlignment = Alignment.Center
     ) {
-        Canvas(Modifier.matchParentSize()) {
+        Canvas(Modifier.width(14.dp).height(96.dp)
+            .align(if (dockOnRight) Alignment.CenterEnd else Alignment.CenterStart)
+            .clip(glassShape).testTag("open_vertical_toolbar_button")) {
             drawMagnifiedPageLens(
                 pageData = pageData,
                 paperStyle = paperStyle,
@@ -107,23 +113,17 @@ fun GlassLensHandle(
                 magnification = 1.42f
             )
 
-            // One small fixed caustic line only. No dark/light-theme branch and no
-            // second outline, so AMOLED gets the same glass treatment as ruled paper.
-            drawLine(
-                color = causticColor,
-                start = Offset(size.width * 0.28f, size.height * 0.10f),
-                end = Offset(size.width * 0.28f, size.height * 0.34f),
-                strokeWidth = 1.15f,
-                cap = StrokeCap.Round
-            )
+            // Borderless refraction and a soft reflection; no bezel or opaque backing.
+            drawRect(brush = Brush.radialGradient(
+                listOf(Color.White.copy(alpha = 0.14f), Color.Transparent),
+                center = Offset(size.width * 0.25f, size.height * 0.7f), radius = size.height * 0.42f))
+            drawLine(color = Color.White.copy(alpha = 0.44f),
+                start = Offset(size.width * 0.25f, size.height * 0.58f),
+                end = Offset(size.width * 0.18f, size.height * 0.76f),
+                strokeWidth = 1.2f, cap = StrokeCap.Round)
         }
 
-        Icon(
-            imageVector = if (dockOnRight) Icons.Default.ChevronLeft else Icons.Default.ChevronRight,
-            contentDescription = "Open Drawing Toolbar",
-            tint = chevronColor,
-            modifier = Modifier.testTag("open_vertical_toolbar_button")
-        )
+
     }
 }
 

@@ -10,11 +10,13 @@ import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -49,8 +51,10 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -73,6 +77,7 @@ fun CanvasScreen(
     onNavigateBack: () -> Unit
 ) {
     val context = LocalContext.current
+    val density = LocalDensity.current
     val scope = rememberCoroutineScope()
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -118,6 +123,8 @@ fun CanvasScreen(
     var showMathPalette by remember { mutableStateOf(false) }
     var showInsertTextDialog by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
+    var toolbarDockRight by remember { mutableStateOf(false) }
+    var toolbarOffsetYPx by remember { mutableStateOf(0f) }
 
     // Intercept hardware / gesture back button to safely return to Home
     BackHandler {
@@ -209,11 +216,22 @@ fun CanvasScreen(
             }
         }
     ) { innerPadding ->
-        Box(
+        BoxWithConstraints(
             modifier = Modifier
                 .fillMaxSize()
                 .padding(innerPadding)
         ) {
+            val maxToolbarOffsetPx = with(density) { maxHeight.toPx() * 0.40f }
+            val lensViewportWidthPx = with(density) { maxWidth.toPx() }
+            val lensHalfWidthPx = with(density) { 7.dp.toPx() }
+            val lensEdgeInsetPx = with(density) { 4.dp.toPx() }
+            val lensSourceXPx = if (toolbarDockRight) {
+                lensViewportWidthPx - lensEdgeInsetPx - lensHalfWidthPx
+            } else {
+                lensEdgeInsetPx + lensHalfWidthPx
+            }
+            val lensSourceYPx = with(density) { maxHeight.toPx() / 2f } + toolbarOffsetYPx
+
             // Main Canvas Area
             HandwritingCanvas(
                 viewModel = viewModel,
@@ -270,31 +288,6 @@ fun CanvasScreen(
                 }
             }
 
-            // Floating Exit Full Screen Button (visible when Full Screen is enabled)
-            if (isFullScreen) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(top = 16.dp, end = 16.dp)
-                        .testTag("exit_fullscreen_container"),
-                    shape = RoundedCornerShape(12.dp),
-                    color = MaterialTheme.colorScheme.surfaceContainerHigh.copy(alpha = 0.92f),
-                    shadowElevation = 6.dp
-                ) {
-                    IconButton(
-                        onClick = { viewModel.setFullScreen(false) },
-                        modifier = Modifier.size(42.dp).testTag("exit_fullscreen_button")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.FullscreenExit,
-                            contentDescription = "Exit Full Screen",
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                }
-            }
-
             // Vertical Tool Palette along the side of the canvas (scrollable, compact, collapsible)
             VerticalDrawingToolbar(
                 viewModel = viewModel,
@@ -308,12 +301,23 @@ fun CanvasScreen(
                 palmRejectionEnabled = palmRejectionEnabled,
                 selectedStrokesCount = selectedStrokeIds.size,
                 isCollapsed = isToolbarCollapsed,
+                isFullScreen = isFullScreen,
+                dockOnRight = toolbarDockRight,
                 onToggleCollapse = { viewModel.toggleToolbar() },
+                onExitFullScreen = { viewModel.setFullScreen(false) },
+                onDockSideChange = { toolbarDockRight = it },
+                onVerticalDrag = { deltaY ->
+                    toolbarOffsetYPx = (toolbarOffsetYPx + deltaY)
+                        .coerceIn(-maxToolbarOffsetPx, maxToolbarOffsetPx)
+                },
+                lensSourceXPx = lensSourceXPx,
+                lensSourceYPx = lensSourceYPx,
                 onOpenMathPalette = { showMathPalette = true },
                 onAddTextPrompt = { showInsertTextDialog = true },
                 modifier = Modifier
-                    .align(Alignment.CenterStart)
-                    .padding(start = 6.dp)
+                    .align(if (toolbarDockRight) Alignment.CenterEnd else Alignment.CenterStart)
+                    .offset { IntOffset(0, toolbarOffsetYPx.roundToInt()) }
+                    .padding(horizontal = 4.dp)
             )
         }
     }

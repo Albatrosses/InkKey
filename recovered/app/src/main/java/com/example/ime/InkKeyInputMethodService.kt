@@ -84,7 +84,29 @@ class InkKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewModel
         currentComposeView?.disposeComposition()
 
         val themedContext = ContextThemeWrapper(this, R.style.Theme_MyApplication)
+        val inputRepo = com.example.ime.data.ImeDocumentRepository.getInstance(this)
         val composeView = ComposeView(themedContext)
+        val rootView = object : android.widget.FrameLayout(themedContext) {
+            override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean {
+                com.example.util.UpperTrialTrace.motion(event, "IME_VIEW_TOUCH")
+                inputRepo.handleTouchMotionEvent(event)
+                return super.dispatchTouchEvent(event)
+            }
+
+            override fun dispatchGenericMotionEvent(event: android.view.MotionEvent): Boolean {
+                com.example.util.UpperTrialTrace.motion(event, "IME_VIEW_GENERIC")
+                val handled = inputRepo.handleGenericMotionEvent(event)
+                return if (handled) true else super.dispatchGenericMotionEvent(event)
+            }
+
+            override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                return if (inputRepo.handleHardwareKeyEvent(event)) true else super.dispatchKeyEvent(event)
+            }
+
+            override fun dispatchKeyEventPreIme(event: KeyEvent): Boolean {
+                return if (inputRepo.handleHardwareKeyEvent(event)) true else super.dispatchKeyEventPreIme(event)
+            }
+        }
         composeView.setViewTreeLifecycleOwner(this)
         composeView.setViewTreeViewModelStoreOwner(this)
         composeView.setViewTreeSavedStateRegistryOwner(this)
@@ -119,7 +141,14 @@ class InkKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewModel
             }
         }
         currentComposeView = composeView
-        return composeView
+        rootView.addView(
+            composeView,
+            android.widget.FrameLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+        return rootView
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
@@ -176,39 +205,19 @@ class InkKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewModel
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (keyCode == KeyEvent.KEYCODE_BACK) return super.onKeyDown(keyCode, event)
         val repo = com.example.ime.data.ImeDocumentRepository.getInstance(this)
-        val config = repo.tabletConfig.value
-        val index = config.findMatchingKeyIndex(keyCode, event.scanCode, event)
-        val target = com.example.util.StylusHardwareDetector.classifyKeyEvent(keyCode, event.scanCode, event)
-        val xpPen = event.device?.name?.contains("ugtablet deco mini7 v2", true) == true
-        if (index != null && (xpPen || target == com.example.util.StylusHardwareDetector.BarrelTarget.NONE)) {
-            if (event.repeatCount == 0) repo.executeTabletAction(config.expressKeyMappings[index] ?: com.example.model.TabletAction.NONE)
-            return true
-        }
-        if (target != com.example.util.StylusHardwareDetector.BarrelTarget.NONE) {
-            if (event.repeatCount == 0) {
-                if (target == com.example.util.StylusHardwareDetector.BarrelTarget.UPPER_BARREL) repo.triggerUpperBarrelFunction() else repo.triggerLowerBarrelFunction()
-            }
-            return true
-        }
+        if (repo.handleHardwareKeyEvent(event)) return true
         return super.onKeyDown(keyCode, event)
     }
 
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK) return super.onKeyUp(keyCode, event)
         val repo = com.example.ime.data.ImeDocumentRepository.getInstance(this)
-        val config = repo.tabletConfig.value
-        val index = config.findMatchingKeyIndex(keyCode, event.scanCode, event)
-        val xpPen = event.device?.name?.contains("ugtablet deco mini7 v2", true) == true
-        if (xpPen && index != null) return true
-        val target = com.example.util.StylusHardwareDetector.classifyKeyEvent(keyCode, event.scanCode, event)
-        if (target != com.example.util.StylusHardwareDetector.BarrelTarget.NONE) {
-            if (target == com.example.util.StylusHardwareDetector.BarrelTarget.UPPER_BARREL) repo.triggerUpperBarrelFunction(false) else repo.triggerLowerBarrelFunction(false)
-            return true
-        }
+        if (repo.handleHardwareKeyEvent(event)) return true
         return super.onKeyUp(keyCode, event)
     }
 
     override fun onGenericMotionEvent(event: android.view.MotionEvent): Boolean {
-        com.example.util.UpperTrialTrace.motion(event, "IME_GENERIC")
+        com.example.util.UpperTrialTrace.motion(event, "IME_SERVICE_GENERIC")
         if (com.example.ime.data.ImeDocumentRepository.getInstance(this).handleGenericMotionEvent(event)) return true
         return super.onGenericMotionEvent(event)
     }

@@ -17,8 +17,10 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.launch
 import kotlin.math.hypot
 
@@ -35,16 +37,81 @@ class ImeDocumentRepository private constructor(private val context: Context) {
 
     private val _tabletConfig = MutableStateFlow(com.example.model.TabletConfig.load(context))
     val tabletConfig = _tabletConfig.asStateFlow()
+    private val _tabletFeedbackMessage = MutableStateFlow<String?>(null)
+    val tabletFeedbackMessage = _tabletFeedbackMessage.asStateFlow()
+    private val _uiTabletActions = MutableSharedFlow<com.example.model.TabletAction>(extraBufferCapacity = 16)
+    val uiTabletActions = _uiTabletActions.asSharedFlow()
     private val barrelInput = com.example.util.BarrelInputRouter({ _tabletConfig.value }, ::executeTabletAction)
     val transientBarrelTool = barrelInput.tools.tool
     fun reloadTabletConfig() { _tabletConfig.value = com.example.model.TabletConfig.load(context); barrelInput.tools.refresh() }
+    fun updateTabletConfig(config: com.example.model.TabletConfig) {
+        _tabletConfig.value = config
+        com.example.model.TabletConfig.save(context, config)
+        barrelInput.tools.refresh()
+    }
+    fun clearTabletFeedback() { _tabletFeedbackMessage.value = null }
     fun clearTransientBarrelTool() = barrelInput.reset()
     fun handleTouchMotionEvent(event: android.view.MotionEvent) = barrelInput.touch(event)
     fun handleGenericMotionEvent(event: android.view.MotionEvent): Boolean = barrelInput.hover(event)
     fun triggerUpperBarrelFunction(down: Boolean = true) = barrelInput.tools.setPressed(com.example.util.BarrelToolController.Input.KEY_UPPER, down)
     fun triggerLowerBarrelFunction(down: Boolean = true) = barrelInput.tools.setPressed(com.example.util.BarrelToolController.Input.KEY_LOWER, down)
 
+    private var lastHardwareKeySignature: String? = null
+    private var lastHardwareKeyHandled: Boolean = false
+
+    fun handleHardwareKeyEvent(event: android.view.KeyEvent): Boolean {
+        val signature = "${event.deviceId}:${event.eventTime}:${event.action}:${event.keyCode}:${event.scanCode}:${event.metaState}"
+        if (signature == lastHardwareKeySignature) return lastHardwareKeyHandled
+
+        val config = _tabletConfig.value
+        val isXpPen = com.example.util.XpPenExpressKeyResolver.isXpPen(event)
+        val knownXpIndex = com.example.util.XpPenExpressKeyResolver.resolve(event)
+        val customIndex = com.example.util.XpPenExpressKeyResolver.resolveCustomBinding(event.keyCode, event.scanCode, config.customKeyCodes, config.customScanCodes)
+        val fallbackIndex = if (isXpPen) null else config.findMatchingKeyIndex(event.keyCode, event.scanCode, event)
+        val keyIndex = customIndex ?: knownXpIndex ?: fallbackIndex
+        val target = com.example.util.StylusHardwareDetector.classifyKeyEvent(event.keyCode, event.scanCode, event)
+        val express = keyIndex != null && (isXpPen || customIndex != null)
+
+        val handled = when {
+            express -> {
+                val action = config.expressKeyMappings[keyIndex] ?: com.example.model.TabletAction.NONE
+                if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0 && action != com.example.model.TabletAction.NONE) {
+                    executeTabletAction(action)
+                    _tabletFeedbackMessage.value = "K$keyIndex: ${action.displayName}"
+                }
+                true
+            }
+            target != com.example.util.StylusHardwareDetector.BarrelTarget.NONE -> {
+                val down = event.action == android.view.KeyEvent.ACTION_DOWN
+                if (event.action == android.view.KeyEvent.ACTION_UP || (down && event.repeatCount == 0)) {
+                    if (target == com.example.util.StylusHardwareDetector.BarrelTarget.UPPER_BARREL) {
+                        triggerUpperBarrelFunction(down)
+                    } else {
+                        triggerLowerBarrelFunction(down)
+                    }
+                }
+                true
+            }
+            isXpPen && com.example.util.XpPenExpressKeyResolver.isCompositePrefix(event) -> true
+            isXpPen -> {
+                if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                    val rawName = android.view.KeyEvent.keyCodeToString(event.keyCode).removePrefix("KEYCODE_")
+                    _tabletFeedbackMessage.value = "XP-Pen unmapped: $rawName · scan ${event.scanCode}"
+                }
+                true
+            }
+            else -> false
+        }
+
+        lastHardwareKeySignature = signature
+        lastHardwareKeyHandled = handled
+        return handled
+    }
+
     fun executeTabletAction(action: com.example.model.TabletAction) {
+        if (action != com.example.model.TabletAction.NONE) {
+            _tabletFeedbackMessage.value = action.displayName
+        }
         val tool = com.example.util.BarrelToolController.toolFor(action)
         if (tool != null) { setTool(tool); return }
         when (action) {
@@ -55,6 +122,11 @@ class ImeDocumentRepository private constructor(private val context: Context) {
             com.example.model.TabletAction.DELETE_PAGE -> deleteCurrentPage()
             com.example.model.TabletAction.PREV_PAGE -> goToPage((_currentPageIndex.value - 1).coerceAtLeast(0))
             com.example.model.TabletAction.NEXT_PAGE -> if (_currentPageIndex.value + 1 < _document.value.pages.size) goToPage(_currentPageIndex.value + 1) else addPage()
+            com.example.model.TabletAction.ZOOM_IN,
+            com.example.model.TabletAction.ZOOM_OUT,
+            com.example.model.TabletAction.RESET_ZOOM,
+            com.example.model.TabletAction.TOGGLE_TOOLBAR,
+            com.example.model.TabletAction.TOGGLE_FULLSCREEN -> _uiTabletActions.tryEmit(action)
             else -> Unit
         }
     }

@@ -39,6 +39,8 @@ object XpPenExpressKeyResolver {
         !ctrl && !alt && !shift && keyCode == KeyEvent.KEYCODE_SPACE -> 4
         ctrl && !alt && keyCode == KeyEvent.KEYCODE_S -> 5
         ctrl && !alt && keyCode == KeyEvent.KEYCODE_Z -> 6
+        !alt && !shift && keyCode == KeyEvent.KEYCODE_NUMPAD_ADD -> 7
+        !alt && !shift && keyCode == KeyEvent.KEYCODE_NUMPAD_SUBTRACT -> 8
         else -> null
     }
 
@@ -58,6 +60,19 @@ object XpPenExpressKeyResolver {
             shift = event.isShiftPressed
         )
     }
+
+    /** A binding learned with both identifiers must match both, not either one. */
+    fun resolveCustomBinding(keyCode: Int, scanCode: Int, keys: Map<Int, Int>, scans: Map<Int, Int>): Int? =
+        (1..8).filter { index ->
+            val key = keys[index]?.takeIf { it != 0 }
+            val scan = scans[index]?.takeIf { it != 0 }
+            when {
+                key != null && scan != null -> keyCode == key && scanCode == scan
+                key != null -> keyCode == key
+                scan != null -> scanCode == scan
+                else -> false
+            }
+        }.singleOrNull()
 
     /** Modifier prefix packets used by composite express keys such as Ctrl+S/Z. */
     fun isCompositePrefix(event: KeyEvent): Boolean = isXpPen(event) && when (event.keyCode) {
