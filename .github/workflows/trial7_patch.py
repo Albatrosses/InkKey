@@ -33,6 +33,15 @@ replace_once(
     'if (gap in 42L..50L && distance <= 32f) return Edge.PRESS_CANDIDATE',
 )
 
+# Keep the existing recovery guard test aligned with the intentionally widened
+# threshold. The next observed Trial 6 point, 34.94 px, must still be rejected.
+recovered_test = root / 'app/src/test/java/com/example/RecoveredInputTest.kt'
+replace_once(
+    recovered_test,
+    'c.observeHover(ContactRestartDetector.Sample(9, 144L, 25f, 0f, 0f, 12), true))',
+    'c.observeHover(ContactRestartDetector.Sample(9, 145L, 34.94f, 0f, 0f, 12), true))',
+)
+
 # InputMethodService.onGenericMotionEvent was not reached by the XP-Pen hover
 # stream in Trial 6 (the shared log had no IME_GENERIC rows). Capture generic
 # stylus motion at the actual ComposeView used by the keyboard instead.
