@@ -39,132 +39,21 @@ jobs:
             echo "GEMINI_API_KEY=placeholder" > .env.example
           fi
 
-      - name: Apply InkKey v1.8 Fixes (Guaranteed Patch)
+      - name: Apply InkKey v1.9 Fixes (Upper Barrel Hold-to-Erase & Toggle)
         run: |
           python3 - << 'EOF'
-          import os, re
+          import os
 
-          # 1. Update version to 1.8 in app/build.gradle.kts
+          # 1. Update version to 1.9 in app/build.gradle.kts
           app_gradle_path = "app/build.gradle.kts"
           with open(app_gradle_path, "r", encoding="utf-8") as f:
               bg = f.read()
-          bg = bg.replace('versionCode = 4', 'versionCode = 8').replace('versionName = "1.3"', 'versionName = "1.8"')
+          bg = bg.replace('versionCode = 4', 'versionCode = 9').replace('versionName = "1.3"', 'versionName = "1.9"')
           with open(app_gradle_path, "w", encoding="utf-8") as f:
               f.write(bg)
-          print("1. SUCCESSFULLY PATCHED app/build.gradle.kts")
+          print("1. Patched app/build.gradle.kts")
 
-          # 2. Patch MainActivity.kt (Intercept ALL Touch + GenericMotion + Key events for 0x28BD:0x0948)
-          main_activity_path = "app/src/main/java/com/example/MainActivity.kt"
-          with open(main_activity_path, "r", encoding="utf-8") as f:
-              code = f.read()
-
-          new_methods = """    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-              val vm = mainViewModel
-              if (vm != null && vm.handleTouchMotionEvent(event)) {
-                  return true
-              }
-              return super.dispatchTouchEvent(event)
-          }
-
-          override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {"""
-
-          if "override fun dispatchTouchEvent" not in code:
-              code = code.replace("    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {", new_methods, 1)
-              with open(main_activity_path, "w", encoding="utf-8") as f:
-                  f.write(code)
-              print("2. SUCCESSFULLY PATCHED MainActivity.kt")
-
-          # 3. Patch MainViewModel.kt:
-          #    - Add handleTouchMotionEvent(event: MotionEvent) to catch 0% pressure ACTION_DOWN / ACTION_MOVE
-          #    - Stop empty ACTION_HOVER_MOVE (buttonState == 0) from overwriting the Hardware Input Monitor!
-          #    - Make Upper Barrel toggle Eraser cleanly without hover events canceling it
-          vm_path = "app/src/main/java/com/example/viewmodel/MainViewModel.kt"
-          with open(vm_path, "r", encoding="utf-8") as f:
-              vm = f.read()
-
-          custom_vm_handler = """    private var lastUpperBarrelToggleTime = 0L
-          private var zeroPressureStrokeActive = false
-
-          fun handleTouchMotionEvent(event: MotionEvent): Boolean {
-              val action = event.actionMasked
-              val buttonState = event.buttonState or (try { event.actionButton } catch (e: Exception) { 0 })
-              val pressure = if (event.pointerCount > 0) event.pressure else 0f
-              val toolTypeInt = if (event.pointerCount > 0) event.getToolType(0) else 0
-              val dev = event.device
-              val isXpPen = (dev?.vendorId == 0x28BD) || (dev?.name?.contains("Deco", ignoreCase = true) == true) || (dev?.name?.contains("UGTABLET", ignoreCase = true) == true) || (toolTypeInt == MotionEvent.TOOL_TYPE_STYLUS)
-
-              // XP-Pen Deco Mini 7 V2 Upper Barrel Button sends ACTION_DOWN / ACTION_MOVE with 0% pressure (pressure <= 0.002f) and buttonState == 0!
-              if (isXpPen && buttonState == 0 && pressure <= 0.002f && toolTypeInt != MotionEvent.TOOL_TYPE_ERASER) {
-                  if (action == MotionEvent.ACTION_DOWN || (action == MotionEvent.ACTION_MOVE && !zeroPressureStrokeActive)) {
-                      zeroPressureStrokeActive = true
-                      val now = System.currentTimeMillis()
-                      if (now - lastUpperBarrelToggleTime > 300L) {
-                          lastUpperBarrelToggleTime = now
-                          val nextTool = if (_currentTool.value == ToolType.STROKE_ERASER || _currentTool.value == ToolType.AREA_ERASER) {
-                              ToolType.PEN
-                          } else {
-                              if (_tabletConfig.value.upperBarrelAction == TabletAction.AREA_ERASER) ToolType.AREA_ERASER else ToolType.STROKE_ERASER
-                          }
-                          setTool(nextTool)
-                          val msg = if (nextTool == ToolType.PEN) "Upper Barrel: Switched to Pen" else "Upper Barrel: Switched to ${if (nextTool == ToolType.AREA_ERASER) "Area " else "Stroke "}Eraser"
-                          _tabletFeedbackMessage.value = msg
-                          _latestDebugEvent.value = HardwareInputDebugEvent(
-                              eventType = "MotionEvent (${MotionEvent.actionToString(action)} - 0% Pressure)",
-                              deviceName = dev?.name ?: "UGTABLET Deco Mini7 V2",
-                              deviceId = dev?.id ?: 0,
-                              vendorId = dev?.vendorId ?: 0x28BD,
-                              productId = dev?.productId ?: 0x0948,
-                              source = "STYLUS UPPER BARREL (0% Pressure)",
-                              buttonState = 0x40,
-                              buttonStateNames = listOf("Upper Barrel (0% Pressure Touch)"),
-                              toolType = "STYLUS",
-                              pressure = pressure,
-                              resolvedAction = msg
-                          )
-                      }
-                      return true
-                  }
-                  if (action == MotionEvent.ACTION_MOVE && zeroPressureStrokeActive) {
-                      return true
-                  }
-              }
-
-              if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                  if (zeroPressureStrokeActive) {
-                      zeroPressureStrokeActive = false
-                      return true
-                  }
-              }
-
-              // Also log any stylus touch with buttonState != 0 to the monitor
-              if (buttonState != 0 || toolTypeInt == MotionEvent.TOOL_TYPE_ERASER) {
-                  handleGenericMotionEvent(event)
-              }
-              return false
-          }
-
-          fun handleGenericMotionEvent(event: MotionEvent): Boolean {"""
-
-          if "fun handleTouchMotionEvent" not in vm:
-              vm = vm.replace("    fun handleGenericMotionEvent(event: MotionEvent): Boolean {", custom_vm_handler, 1)
-
-          # Stop empty ACTION_HOVER_MOVE (when buttonState == 0) from overwriting _latestDebugEvent in the Hardware Monitor!
-          vm = vm.replace(
-              "if (buttonState != 0 || event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS || event.actionMasked == MotionEvent.ACTION_HOVER_MOVE) {",
-              "if (buttonState != 0 || event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS || isEraserTool) {"
-          )
-
-          # Also include BUTTON_SECONDARY (2) in rawUpper inside MainViewModel
-          vm = vm.replace(
-              "MotionEvent.BUTTON_STYLUS_SECONDARY or MotionEvent.BUTTON_TERTIARY",
-              "MotionEvent.BUTTON_STYLUS_SECONDARY or MotionEvent.BUTTON_SECONDARY or MotionEvent.BUTTON_TERTIARY"
-          )
-
-          with open(vm_path, "w", encoding="utf-8") as f:
-              f.write(vm)
-          print("3. SUCCESSFULLY PATCHED MainViewModel.kt")
-
-          # 4. Patch TabletModels.kt (Default upperBarrelAction to STROKE_ERASER & reset minPressure if accidentally set to 50%)
+          # 2. Patch TabletModels.kt (Default upperBarrelAction to STROKE_ERASER)
           tablet_models_path = "app/src/main/java/com/example/model/TabletModels.kt"
           with open(tablet_models_path, "r", encoding="utf-8") as f:
               tm = f.read()
@@ -173,53 +62,163 @@ jobs:
           tm = tm.replace("?: TabletAction.HAND", "?: TabletAction.STROKE_ERASER")
           with open(tablet_models_path, "w", encoding="utf-8") as f:
               f.write(tm)
-          print("4. SUCCESSFULLY PATCHED TabletModels.kt")
+          print("2. Patched TabletModels.kt")
 
-          # 5. Patch HandwritingCanvas.kt (Catch 0% pressure upper barrel packet before drawing + widen symbol hit box)
+          # 3. Patch HandwritingCanvas.kt:
+          #    When user holds Upper Barrel Button and touches/drags on the tablet, XP-Pen sends ACTION_DOWN & ACTION_MOVE with pressure == 0.0f!
+          #    Instead of swallowing the event (which prevented erasing!), we route 0-pressure stylus strokes directly as ERASER strokes!
+          #    And when pressure > 0.0f on ACTION_DOWN, it draws normally with the Pen!
           canvas_path = "app/src/main/java/com/example/ui/canvas/HandwritingCanvas.kt"
           with open(canvas_path, "r", encoding="utf-8") as f:
               hc = f.read()
 
-          hc_target = "val pointerCount = motionEvent.pointerCount"
-          hc_inject = """val pointerCount = motionEvent.pointerCount
-                      if (pointerCount == 1 && !isHardwareEraser && motionEvent.buttonState == 0 && motionEvent.pressure <= 0.002f) {
-                          if (viewModel.handleTouchMotionEvent(motionEvent)) {
-                              return@pointerInteropFilter true
+          # Add state tracker for zero-pressure upper barrel stroke
+          state_target = "var prevBarrel2Pressed by remember { mutableStateOf(false) }"
+          state_inject = """var prevBarrel2Pressed by remember { mutableStateOf(false) }
+              var isZeroPressureBarrelStroke by remember { mutableStateOf(false) }"""
+          hc = hc.replace(state_target, state_inject, 1)
+
+          # Replace barrel detection in HandwritingCanvas.kt so 0-pressure stylus touch activates Upper Barrel Eraser while dragging!
+          old_barrel_section = """                // 3. Stylus barrel button detection & mapping (XP-PEN Deco Mini 7 V2 Stylus)
+                          val buttonState = motionEvent.buttonState
+                          // Lower Barrel Button (Barrel 1): BUTTON_STYLUS_PRIMARY (32) or TOOL_TYPE_ERASER
+                          val rawLower = (buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY != 0) || isHardwareEraser
+                          // Upper Barrel Button (Barrel 2): BUTTON_STYLUS_SECONDARY (64), BUTTON_SECONDARY (2, Right-click), BUTTON_TERTIARY (4), BUTTON_FORWARD (16), BUTTON_BACK (8)
+                          val rawUpper = (buttonState and (MotionEvent.BUTTON_STYLUS_SECONDARY or MotionEvent.BUTTON_SECONDARY or MotionEvent.BUTTON_TERTIARY or MotionEvent.BUTTON_FORWARD or MotionEvent.BUTTON_BACK)) != 0"""
+
+          new_barrel_section = """                // 3. Stylus barrel button detection & mapping (XP-PEN Deco Mini 7 V2 Stylus)
+                          val buttonState = motionEvent.buttonState or (try { motionEvent.actionButton } catch (e: Exception) { 0 })
+                          val isStylusOrMouse = toolType == MotionEvent.TOOL_TYPE_STYLUS || toolType == MotionEvent.TOOL_TYPE_MOUSE || isHardwareEraser
+
+                          // XP-Pen Deco Mini 7 V2 Upper Barrel Button:
+                          // Holding Upper Barrel + touching/dragging nib sends ACTION_DOWN & ACTION_MOVE with pressure == 0.0f!
+                          when (motionEvent.actionMasked) {
+                              MotionEvent.ACTION_DOWN -> {
+                                  isZeroPressureBarrelStroke = isStylusOrMouse && !isHardwareEraser && buttonState == 0 && motionEvent.pressure <= 0.001f
+                              }
+                              MotionEvent.ACTION_MOVE -> {
+                                  // If pressure rises above 0.005f, it is a normal pen stroke, not a 0-pressure barrel stroke
+                                  if (motionEvent.pressure > 0.005f) {
+                                      isZeroPressureBarrelStroke = false
+                                  }
+                              }
+                              MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                                  // Keep true through ACTION_UP cleanup, reset right after
+                              }
                           }
-                      }"""
-          if "viewModel.handleTouchMotionEvent" not in hc:
-              hc = hc.replace(hc_target, hc_inject, 1)
+
+                          // Lower Barrel Button (Barrel 1): BUTTON_STYLUS_PRIMARY (32) or TOOL_TYPE_ERASER
+                          val rawLower = (buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY != 0) || isHardwareEraser
+                          // Upper Barrel Button (Barrel 2): Standard button bits OR XP-Pen 0-pressure barrel contact
+                          val rawUpper = (buttonState and (MotionEvent.BUTTON_STYLUS_SECONDARY or MotionEvent.BUTTON_SECONDARY or MotionEvent.BUTTON_TERTIARY or MotionEvent.BUTTON_FORWARD or MotionEvent.BUTTON_BACK)) != 0 || isZeroPressureBarrelStroke"""
+
+          hc = hc.replace(old_barrel_section, new_barrel_section, 1)
+
+          # Also ensure eraser circle cursor is visible during hardware/barrel erasing!
+          old_cursor = "if (activeTouchPos != null && (currentTool == ToolType.STROKE_ERASER || currentTool == ToolType.AREA_ERASER)) {"
+          new_cursor = "if (activeTouchPos != null && (currentTool == ToolType.STROKE_ERASER || currentTool == ToolType.AREA_ERASER || isZeroPressureBarrelStroke || prevBarrel1Pressed || prevBarrel2Pressed)) {"
+          hc = hc.replace(old_cursor, new_cursor, 1)
+
+          # Reset isZeroPressureBarrelStroke on ACTION_UP/CANCEL
+          old_up = "MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {\n                        activeTouchPos = null"
+          new_up = "MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {\n                        activeTouchPos = null\n                        isZeroPressureBarrelStroke = false\n                        prevBarrel1Pressed = false\n                        prevBarrel2Pressed = false"
+          hc = hc.replace(old_up, new_up, 1)
 
           hc = hc.replace("sym.hitTest(canvasX, canvasY, padding = 8f)", "sym.hitTest(canvasX, canvasY, padding = 24f)")
           with open(canvas_path, "w", encoding="utf-8") as f:
               f.write(hc)
-          print("5. SUCCESSFULLY PATCHED HandwritingCanvas.kt")
+          print("3. Patched HandwritingCanvas.kt")
 
-          # 6. Patch KeyboardCanvasView.kt (Catch 0% pressure upper barrel packet in IME Keyboard too!)
+          # 4. Patch KeyboardCanvasView.kt:
+          #    Same hold-to-erase & 0-pressure barrel erasing inside the IME Keyboard!
           ime_path = "app/src/main/java/com/example/ime/ui/KeyboardCanvasView.kt"
           with open(ime_path, "r", encoding="utf-8") as f:
               ime = f.read()
 
-          ime_target = "val buttonState = motionEvent.buttonState"
-          ime_inject = """val buttonState = motionEvent.buttonState
-                                  if (!isEraserHardware && buttonState == 0 && pressure <= 0.002f) {
-                                      if (motionEvent.actionMasked == MotionEvent.ACTION_DOWN) {
-                                          val toggled = if (currentTool == ToolType.STROKE_ERASER || currentTool == ToolType.AREA_ERASER) ToolType.PEN else ToolType.STROKE_ERASER
-                                          repository.setTool(toggled)
-                                          notificationMessage = if (toggled == ToolType.PEN) "Upper Barrel: Switched to Pen" else "Upper Barrel: Switched to Eraser"
-                                      }
-                                      return@pointerInteropFilter true
-                                  }"""
-          if "Upper Barrel: Switched to Eraser" not in ime:
-              ime = ime.replace(ime_target, ime_inject, 1)
+          ime_state_target = "var liveStroke by remember { mutableStateOf<DrawingStroke?>(null) }"
+          ime_state_inject = """var liveStroke by remember { mutableStateOf<DrawingStroke?>(null) }
+              var isImeZeroPressureBarrel by remember { mutableStateOf(false) }"""
+          ime = ime.replace(ime_state_target, ime_state_inject, 1)
 
-          ime = ime.replace("isBarrel2 -> ToolType.HAND", "isBarrel2 -> ToolType.STROKE_ERASER")
+          old_ime_barrel = """                            val pressure = motionEvent.pressure
+                                      val buttonState = motionEvent.buttonState
+                                      val isBarrel1 = (buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY != 0) || isEraserHardware
+                                      val isBarrel2 = (buttonState and (MotionEvent.BUTTON_STYLUS_SECONDARY or MotionEvent.BUTTON_SECONDARY or MotionEvent.BUTTON_TERTIARY or MotionEvent.BUTTON_FORWARD or MotionEvent.BUTTON_BACK)) != 0
+
+                                      val activeTool = when {
+                                          isBarrel1 -> ToolType.STROKE_ERASER
+                                          isBarrel2 -> ToolType.HAND
+                                          isEraserHardware -> ToolType.STROKE_ERASER
+                                          else -> currentTool
+                                      }"""
+
+          new_ime_barrel = """                            val pressure = motionEvent.pressure
+                                      val buttonState = motionEvent.buttonState or (try { motionEvent.actionButton } catch (e: Exception) { 0 })
+                                      when (motionEvent.actionMasked) {
+                                          MotionEvent.ACTION_DOWN -> {
+                                              isImeZeroPressureBarrel = isStylus && !isEraserHardware && buttonState == 0 && pressure <= 0.001f
+                                          }
+                                          MotionEvent.ACTION_MOVE -> {
+                                              if (pressure > 0.005f) isImeZeroPressureBarrel = false
+                                          }
+                                      }
+                                      val isBarrel1 = (buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY != 0) || isEraserHardware
+                                      val isBarrel2 = (buttonState and (MotionEvent.BUTTON_STYLUS_SECONDARY or MotionEvent.BUTTON_SECONDARY or MotionEvent.BUTTON_TERTIARY or MotionEvent.BUTTON_FORWARD or MotionEvent.BUTTON_BACK)) != 0 || isImeZeroPressureBarrel
+
+                                      val activeTool = when {
+                                          isBarrel1 -> ToolType.STROKE_ERASER
+                                          isBarrel2 -> ToolType.STROKE_ERASER
+                                          isEraserHardware -> ToolType.STROKE_ERASER
+                                          else -> currentTool
+                                      }"""
+
+          ime = ime.replace(old_ime_barrel, new_ime_barrel, 1)
+          ime = ime.replace(
+              "MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {",
+              "MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {\n                                    isImeZeroPressureBarrel = false",
+              1
+          )
           ime = ime.replace("hitTestSymbol(sym, canvasX, canvasY, padding = 8f)", "hitTestSymbol(sym, canvasX, canvasY, padding = 22f)")
           with open(ime_path, "w", encoding="utf-8") as f:
               f.write(ime)
-          print("6. SUCCESSFULLY PATCHED KeyboardCanvasView.kt")
+          print("4. Patched KeyboardCanvasView.kt")
 
-          # 7. Patch ShapeRecognizer.kt
+          # 5. Patch MainActivity.kt & MainViewModel.kt so Settings Hardware Input Monitor shows 0-pressure Upper Barrel Touch!
+          main_activity_path = "app/src/main/java/com/example/MainActivity.kt"
+          with open(main_activity_path, "r", encoding="utf-8") as f:
+              ma = f.read()
+          ma_inject = """    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+              val vm = mainViewModel
+              if (vm != null && event.pointerCount > 0 && (event.buttonState != 0 || event.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER || (event.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS && event.pressure <= 0.001f && event.actionMasked == MotionEvent.ACTION_DOWN))) {
+                  vm.handleGenericMotionEvent(event)
+              }
+              return super.dispatchTouchEvent(event)
+          }
+
+          override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {"""
+          if "override fun dispatchTouchEvent" not in ma:
+              ma = ma.replace("    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {", ma_inject, 1)
+              with open(main_activity_path, "w", encoding="utf-8") as f:
+                  f.write(ma)
+          print("5. Patched MainActivity.kt")
+
+          vm_path = "app/src/main/java/com/example/viewmodel/MainViewModel.kt"
+          with open(vm_path, "r", encoding="utf-8") as f:
+              vm = f.read()
+          old_vm_raw = "val rawUpper = (buttonState and (MotionEvent.BUTTON_STYLUS_SECONDARY or MotionEvent.BUTTON_TERTIARY or MotionEvent.BUTTON_FORWARD or MotionEvent.BUTTON_BACK)) != 0"
+          new_vm_raw = """val isZeroPressureDown = event.pointerCount > 0 && event.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS && event.pressure <= 0.001f && (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_MOVE) && event.actionMasked != MotionEvent.ACTION_HOVER_MOVE
+                  val rawUpper = (buttonState and (MotionEvent.BUTTON_STYLUS_SECONDARY or MotionEvent.BUTTON_SECONDARY or MotionEvent.BUTTON_TERTIARY or MotionEvent.BUTTON_FORWARD or MotionEvent.BUTTON_BACK)) != 0 || isZeroPressureDown"""
+          vm = vm.replace(old_vm_raw, new_vm_raw, 1)
+          vm = vm.replace(
+              "if (buttonState != 0 || event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS || event.actionMasked == MotionEvent.ACTION_HOVER_MOVE) {",
+              "if (buttonState != 0 || isZeroPressureDown || event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS || event.actionMasked == MotionEvent.ACTION_HOVER_MOVE) {",
+              1
+          )
+          with open(vm_path, "w", encoding="utf-8") as f:
+              f.write(vm)
+          print("6. Patched MainViewModel.kt")
+
+          # 6. Patch ShapeRecognizer.kt
           shape_path = "app/src/main/java/com/example/util/ShapeRecognizer.kt"
           with open(shape_path, "r", encoding="utf-8") as f:
               sr = f.read()
@@ -264,7 +263,7 @@ jobs:
           sr = sr.replace("straightnessRatio >= 0.90f", "straightnessRatio >= 0.85f")
           with open(shape_path, "w", encoding="utf-8") as f:
               f.write(sr)
-          print("7. SUCCESSFULLY PATCHED ShapeRecognizer.kt")
+          print("7. Patched ShapeRecognizer.kt")
           EOF
 
       - name: Set up JDK 21
@@ -293,5 +292,5 @@ jobs:
       - name: Upload APK to Download
         uses: actions/upload-artifact@v4
         with:
-          name: InkKey-v1.8-debug-apk
+          name: InkKey-v1.9-debug-apk
           path: app/build/outputs/apk/debug/*.apk
