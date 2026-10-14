@@ -33,11 +33,11 @@ class RecoveredInputTest {
             c.observeHover(ContactRestartDetector.Sample(9, 101728200L, 393.92578f, 1195.459f, 0f, 12), true))
     }
 
-    @Test fun movingOutOfTheHoverGuardDoesNotPress() {
+    @Test fun movingBeyondTrial7HoverGuardDoesNotPress() {
         val c = ContactRestartDetector()
         c.observeHover(ContactRestartDetector.Sample(10, 100L, 0f, 0f, 0f, 12), true)
         assertEquals(ContactRestartDetector.Edge.NONE,
-            c.observeHover(ContactRestartDetector.Sample(9, 144L, 25f, 0f, 0f, 12), true))
+            c.observeHover(ContactRestartDetector.Sample(9, 144L, 121f, 0f, 0f, 12), true))
     }
 
     private fun event(tool: Int, buttons: Int): MotionEvent {
