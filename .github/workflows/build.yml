@@ -22,26 +22,66 @@ jobs:
             unzip -o inkkey.zip
             rm -f inkkey.zip
           fi
-          # If files were zipped inside a subfolder, move them to root
           for dir in inkkey project InkKey; do
             if [ ! -f settings.gradle.kts ] && [ -d "$dir" ]; then
               mv "$dir"/* . 2>/dev/null || true
               mv "$dir"/.* . 2>/dev/null || true
             fi
           done
-          # If app/src is inside a nested zip, unpack it too
           if [ -f InkKey_Source_Code.zip ]; then
             unzip -o InkKey_Source_Code.zip
             rm -f InkKey_Source_Code.zip
           fi
-          ls -la
+          # Create .env if missing so Secrets plugin doesn't fail
+          if [ ! -f .env ]; then
+            cp .env.example .env 2>/dev/null || echo "GEMINI_API_KEY=placeholder" > .env
+          fi
+          if [ ! -f .env.example ]; then
+            echo "GEMINI_API_KEY=placeholder" > .env.example
+          fi
 
-      - name: Apply InkKey v1.6 Fixes (XP-Pen Upper Barrel + Shapes + Symbols)
+      - name: Patch Gradle Versions & Apply InkKey v1.6 Fixes
         run: |
           python3 - << 'EOF'
-          import os
+          import os, re
 
-          # 1. Fix MainActivity.kt (Catch XP-Pen zero-pressure upper barrel touch events)
+          # A. Normalize AI Studio internal versions to standard public Maven versions
+          toml_path = "gradle/libs.versions.toml"
+          if os.path.exists(toml_path):
+              with open(toml_path, "r", encoding="utf-8") as f:
+                  toml = f.read()
+              replacements = {
+                  'agp = "9.1.1"': 'agp = "8.7.3"',
+                  'coreKtx = "1.18.0"': 'coreKtx = "1.15.0"',
+                  'espressoCore = "3.7.0"': 'espressoCore = "3.6.1"',
+                  'kotlin = "2.2.10"': 'kotlin = "2.1.0"',
+                  'googleDevtoolsKsp = "2.3.5"': 'googleDevtoolsKsp = "2.1.0-1.0.29"',
+                  'retrofit = "2.12.0"': 'retrofit = "2.11.0"',
+                  'converterMoshi = "2.12.0"': 'converterMoshi = "2.11.0"',
+                  'robolectric = "4.16.1"': 'robolectric = "4.14.1"',
+                  'firebaseBom = "34.17.0"': 'firebaseBom = "33.7.0"',
+                  'googleServices = "4.5.0"': 'googleServices = "4.4.2"',
+              }
+              for k, v in replacements.items():
+                  toml = toml.replace(k, v)
+              with open(toml_path, "w", encoding="utf-8") as f:
+                  f.write(toml)
+              print("Normalized gradle/libs.versions.toml")
+
+          app_gradle_path = "app/build.gradle.kts"
+          if os.path.exists(app_gradle_path):
+              with open(app_gradle_path, "r", encoding="utf-8") as f:
+                  bg = f.read()
+              bg = re.sub(r'compileSdk\s*\{[^}]*\}', 'compileSdk = 35', bg)
+              bg = bg.replace('targetSdk = 36', 'targetSdk = 35')
+              bg = bg.replace('versionCode = 4', 'versionCode = 6')
+              bg = bg.replace('versionName = "1.3"', 'versionName = "1.6"')
+              bg = bg.replace('implementation(libs.firebase.ai)', '// implementation(libs.firebase.ai)')
+              with open(app_gradle_path, "w", encoding="utf-8") as f:
+                  f.write(bg)
+              print("Normalized app/build.gradle.kts")
+
+          # B. Fix MainActivity.kt (Catch XP-Pen zero-pressure upper barrel touch events)
           main_activity_path = "app/src/main/java/com/example/MainActivity.kt"
           if os.path.exists(main_activity_path):
               with open(main_activity_path, "r", encoding="utf-8") as f:
@@ -85,7 +125,7 @@ jobs:
                       f.write(code)
                   print("Patched MainActivity.kt")
 
-          # 2. Fix TabletModels.kt (Default upperBarrelAction to STROKE_ERASER)
+          # C. Fix TabletModels.kt (Default upperBarrelAction to STROKE_ERASER)
           tablet_models_path = "app/src/main/java/com/example/model/TabletModels.kt"
           if os.path.exists(tablet_models_path):
               with open(tablet_models_path, "r", encoding="utf-8") as f:
@@ -104,7 +144,7 @@ jobs:
                   f.write(code)
               print("Patched TabletModels.kt")
 
-          # 3. Fix HandwritingCanvas.kt (Zero-pressure Upper Barrel Eraser + Easy Symbol Selection)
+          # D. Fix HandwritingCanvas.kt (Zero-pressure Upper Barrel Eraser + Easy Symbol Selection)
           canvas_path = "app/src/main/java/com/example/ui/canvas/HandwritingCanvas.kt"
           if os.path.exists(canvas_path):
               with open(canvas_path, "r", encoding="utf-8") as f:
@@ -142,7 +182,7 @@ jobs:
                   f.write(code)
               print("Patched HandwritingCanvas.kt")
 
-          # 4. Fix KeyboardCanvasView.kt (Zero-pressure Upper Barrel Eraser in IME Keyboard + Easy Symbol Selection)
+          # E. Fix KeyboardCanvasView.kt (Zero-pressure Upper Barrel Eraser in IME Keyboard + Easy Symbol Selection)
           ime_canvas_path = "app/src/main/java/com/example/ime/ui/KeyboardCanvasView.kt"
           if os.path.exists(ime_canvas_path):
               with open(ime_canvas_path, "r", encoding="utf-8") as f:
@@ -174,7 +214,7 @@ jobs:
                   f.write(code)
               print("Patched KeyboardCanvasView.kt")
 
-          # 5. Fix ShapeRecognizer.kt (Honor selected shape type & relax freehand shape detection)
+          # F. Fix ShapeRecognizer.kt (Honor selected shape type & relax freehand shape detection)
           shape_path = "app/src/main/java/com/example/util/ShapeRecognizer.kt"
           if os.path.exists(shape_path):
               with open(shape_path, "r", encoding="utf-8") as f:
@@ -230,19 +270,19 @@ jobs:
               print("Patched ShapeRecognizer.kt")
           EOF
 
-      - name: Set up JDK 21
+      - name: Set up JDK 17
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          java-version: '17'
           distribution: 'temurin'
 
       - name: Accept Android SDK Licenses
         run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
-      - name: Setup Gradle
+      - name: Setup Gradle 8.11.1
         uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '9.3.1'
+          gradle-version: '8.11.1'
 
       - name: Generate Debug Keystore (if missing)
         run: |
@@ -251,7 +291,7 @@ jobs:
           fi
 
       - name: Build Debug APK
-        run: gradle assembleDebug --no-daemon --stacktrace
+        run: gradle assembleDebug --no-daemon --no-configuration-cache
 
       - name: Upload APK to Download
         uses: actions/upload-artifact@v4
