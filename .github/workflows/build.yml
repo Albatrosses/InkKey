@@ -5,6 +5,9 @@ on:
     branches: [ "main", "master" ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -12,6 +15,8 @@ jobs:
     steps:
       - name: Checkout Source Code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Ensure Clean Source Tree & .env
         run: |
@@ -30,7 +35,7 @@ jobs:
             echo "GEMINI_API_KEY=placeholder" > .env.example
           fi
 
-      - name: Apply InkKey v2.3 Probe-Calibrated Fix
+      - name: Apply InkKey v2.4 (V18_TRIGGER Toggle + 0.115f Hold-Erase + Probe Logger)
         run: |
           python3 - << 'EOF'
           import os, sys
@@ -53,42 +58,66 @@ jobs:
                           break
               return source[:idx] + new_fun_code + source[end_idx:]
 
-          # 1. Update version to 2.3
+          # 1. Bump version to 2.4 (versionCode 14)
           with open("app/build.gradle.kts", "r", encoding="utf-8") as f:
               bg = f.read()
-          bg = bg.replace('versionCode = 12', 'versionCode = 13').replace('versionCode = 4', 'versionCode = 13')
-          bg = bg.replace('versionName = "2.2"', 'versionName = "2.3"').replace('versionName = "1.3"', 'versionName = "2.3"')
+          for old_vc in ['versionCode = 13', 'versionCode = 12', 'versionCode = 4']:
+              bg = bg.replace(old_vc, 'versionCode = 14')
+          for old_vn in ['versionName = "2.3"', 'versionName = "2.2"', 'versionName = "1.3"']:
+              bg = bg.replace(old_vn, 'versionName = "2.4"')
           with open("app/build.gradle.kts", "w", encoding="utf-8") as f:
               f.write(bg)
 
-          # 2. Patch HandwritingCanvas.kt directly using the exact probe signatures:
-          #    Signature 1: ACTION_DOWN initial pressure spike >= 0.24f (Upper Barrel Held shifts coil bias so ACTION_DOWN starts at 0.28..0.91f, whereas normal writing ALWAYS starts at 0.018..0.11f!)
-          #    Signature 2: Sub-floor pressure in 0.0001f..0.0045f during ACTION_MOVE/DOWN (normal writing floor is 0.009949f; Upper Barrel dips to 0.0009..0.0033f!)
+          # 2. Update HandwritingCanvas.kt with V18_TRIGGER (<0.0090f) + Tap-Toggle + Hold-to-Erase (>=0.115f)
           hc_path = "app/src/main/java/com/example/ui/canvas/HandwritingCanvas.kt"
           with open(hc_path, "r", encoding="utf-8") as f:
               hc = f.read()
 
-          # Add state variables if not present
           if "var upperBarrelHoldEraseActive" not in hc:
               hc = hc.replace(
                   "var prevBarrel2Pressed by remember { mutableStateOf(false) }",
                   """var prevBarrel2Pressed by remember { mutableStateOf(false) }
               var upperBarrelHoldEraseActive by remember { mutableStateOf(false) }
-              var lastSubFloorToggleTime by remember { mutableStateOf(0L) }"""
+              var lastSubFloorToggleTime by remember { mutableStateOf(0L) }
+              var upperDownStartTime by remember { mutableStateOf(0L) }
+              var upperDownStartPos by remember { mutableStateOf(Offset.Zero) }
+              var upperDragDistance by remember { mutableStateOf(0f) }"""
+              )
+          elif "var upperDownStartTime" not in hc:
+              hc = hc.replace(
+                  "var lastSubFloorToggleTime by remember { mutableStateOf(0L) }",
+                  """var lastSubFloorToggleTime by remember { mutableStateOf(0L) }
+              var upperDownStartTime by remember { mutableStateOf(0L) }
+              var upperDownStartPos by remember { mutableStateOf(Offset.Zero) }
+              var upperDragDistance by remember { mutableStateOf(0f) }"""
               )
 
-          # Inject probe-calibrated detection right after val rawUpper = ...
+          start_marker = "val isStylusDevice = toolType == MotionEvent.TOOL_TYPE_STYLUS"
+          end_marker = "|| upperBarrelHoldEraseActive"
           old_upper_line = "val isUpperBarrel = if (tabletConfig.swapBarrelButtons) rawLower else rawUpper"
-          new_upper_block = """val isStylusDevice = toolType == MotionEvent.TOOL_TYPE_STYLUS
+
+          v24_upper_block = """val isStylusDevice = toolType == MotionEvent.TOOL_TYPE_STYLUS
                       val rawP = motionEvent.pressure
-                      // Check histórico first sample on ACTION_DOWN (in case Android batched the first sample into history[0])
                       val firstTouchPressure = if (motionEvent.historySize > 0) motionEvent.getHistoricalPressure(0) else rawP
+                      var minSamplePressure = rawP
+                      for (h in 0 until motionEvent.historySize) {
+                          val hp = motionEvent.getHistoricalPressure(h)
+                          if (hp < minSamplePressure) minSamplePressure = hp
+                      }
+
+                      // Record into ButtonProbe log
+                      viewModel.recordProbeMotionEvent(motionEvent, firstTouchPressure, minSamplePressure)
 
                       if (isStylusDevice && !isHardwareEraser && buttonState == 0) {
                           when (motionEvent.actionMasked) {
                               MotionEvent.ACTION_DOWN -> {
-                                  // Probe Signature 1: Holding Upper Barrel causes initial ACTION_DOWN pressure to jump >= 0.24f immediately!
-                                  if (firstTouchPressure >= 0.24f) {
+                                  upperDownStartTime = System.currentTimeMillis()
+                                  upperDownStartPos = Offset(motionEvent.x, motionEvent.y)
+                                  upperDragDistance = 0f
+
+                                  // Signature A: Initial contact pressure spike >= 0.115f (Normal writing starts at 0.010f..0.095f)
+                                  // OR V18 sub-floor packet (0.0001f..0.0090f, below 0.009949f normal floor)
+                                  if (firstTouchPressure >= 0.115f || (minSamplePressure > 0f && minSamplePressure <= 0.0090f)) {
                                       upperBarrelHoldEraseActive = true
                                       viewModel.cancelLiveStroke()
                                   } else {
@@ -96,23 +125,36 @@ jobs:
                                   }
                               }
                               MotionEvent.ACTION_MOVE -> {
-                                  // Probe Signature 2: Sub-floor pressure packet (< 0.0045f, normal floor is 0.00995f)
-                                  var minHistP = rawP
-                                  for (h in 0 until motionEvent.historySize) {
-                                      val hp = motionEvent.getHistoricalPressure(h)
-                                      if (hp < minHistP) minHistP = hp
-                                  }
-                                  if (minHistP <= 0.0045f && !upperBarrelHoldEraseActive) {
+                                  val moveDist = (Offset(motionEvent.x, motionEvent.y) - upperDownStartPos).getDistance()
+                                  if (moveDist > upperDragDistance) upperDragDistance = moveDist
+
+                                  // Signature B (V18_TRIGGER): Sub-floor pressure packet (0.0001f..0.0090f) during move/lift
+                                  if (minSamplePressure > 0f && minSamplePressure <= 0.0090f) {
                                       val now = System.currentTimeMillis()
-                                      if (now - lastSubFloorToggleTime > 350L) {
+                                      if (!upperBarrelHoldEraseActive && now - lastSubFloorToggleTime > 280L) {
                                           lastSubFloorToggleTime = now
                                           viewModel.cancelLiveStroke()
                                           val nextT = if (currentTool == ToolType.STROKE_ERASER || currentTool == ToolType.AREA_ERASER) ToolType.PEN else ToolType.STROKE_ERASER
                                           viewModel.setTool(nextT)
+                                          viewModel.onV18SubFloorTrigger(minSamplePressure, nextT)
                                       }
                                   }
                               }
                               MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                                  val pressDuration = System.currentTimeMillis() - upperDownStartTime
+                                  val wasQuickTap = pressDuration < 280L && upperDragDistance < 32f
+                                  if (upperBarrelHoldEraseActive && wasQuickTap) {
+                                      // Quick tap while holding Upper Barrel -> Permanently toggle PEN <-> STROKE_ERASER!
+                                      val now = System.currentTimeMillis()
+                                      if (now - lastSubFloorToggleTime > 250L) {
+                                          lastSubFloorToggleTime = now
+                                          viewModel.cancelLiveStroke()
+                                          val nextT = if (prevBarrelTool == ToolType.STROKE_ERASER || prevBarrelTool == ToolType.AREA_ERASER) ToolType.PEN else ToolType.STROKE_ERASER
+                                          prevBarrelTool = nextT
+                                          viewModel.setTool(nextT)
+                                          viewModel.onV18SubFloorTrigger(firstTouchPressure, nextT)
+                                      }
+                                  }
                                   upperBarrelHoldEraseActive = false
                               }
                           }
@@ -120,129 +162,8 @@ jobs:
 
                       val isUpperBarrel = (if (tabletConfig.swapBarrelButtons) rawLower else rawUpper) || upperBarrelHoldEraseActive"""
 
-          if "upperBarrelHoldEraseActive = true" not in hc:
-              hc = hc.replace(old_upper_line, new_upper_block, 1)
-
-          # Show red eraser circle cursor when upperBarrelHoldEraseActive is true
-          hc = hc.replace(
-              "if (activeTouchPos != null && (currentTool == ToolType.STROKE_ERASER || currentTool == ToolType.AREA_ERASER)) {",
-              "if (activeTouchPos != null && (currentTool == ToolType.STROKE_ERASER || currentTool == ToolType.AREA_ERASER || upperBarrelHoldEraseActive || prevBarrel1Pressed || prevBarrel2Pressed)) {"
-          )
-          hc = hc.replace(
-              "if (activeTouchPos != null && (currentTool == ToolType.STROKE_ERASER || currentTool == ToolType.AREA_ERASER || prevBarrel1Pressed || prevBarrel2Pressed)) {",
-              "if (activeTouchPos != null && (currentTool == ToolType.STROKE_ERASER || currentTool == ToolType.AREA_ERASER || upperBarrelHoldEraseActive || prevBarrel1Pressed || prevBarrel2Pressed)) {"
-          )
-
-          with open(hc_path, "w", encoding="utf-8") as f:
-              f.write(hc)
-          print("VERIFIED: HandwritingCanvas.kt patched with Probe Signatures 1 & 2!")
-
-          # 3. Also patch KeyboardCanvasView.kt with the exact same Probe Signatures so the IME Keyboard erases when holding Upper Barrel!
-          ime_path = "app/src/main/java/com/example/ime/ui/KeyboardCanvasView.kt"
-          with open(ime_path, "r", encoding="utf-8") as f:
-              ime = f.read()
-
-          if "var imeUpperBarrelHoldActive" not in ime:
-              ime = ime.replace(
-                  "var liveStroke by remember { mutableStateOf<DrawingStroke?>(null) }",
-                  """var liveStroke by remember { mutableStateOf<DrawingStroke?>(null) }
-              var imeUpperBarrelHoldActive by remember { mutableStateOf(false) }"""
-              )
-
-          old_ime_active = "val activeTool = when {"
-          new_ime_active = """val firstImeP = if (motionEvent.historySize > 0) motionEvent.getHistoricalPressure(0) else pressure
-                                      if (isStylus && !isEraserHardware && buttonState == 0) {
-                                          when (motionEvent.actionMasked) {
-                                              MotionEvent.ACTION_DOWN -> {
-                                                  imeUpperBarrelHoldActive = firstImeP >= 0.24f
-                                              }
-                                              MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                                                  imeUpperBarrelHoldActive = false
-                                              }
-                                          }
-                                      }
-                                      val activeTool = when {
-                                          imeUpperBarrelHoldActive -> ToolType.STROKE_ERASER"""
-
-          if "imeUpperBarrelHoldActive -> ToolType.STROKE_ERASER" not in ime:
-              ime = ime.replace(old_ime_active, new_ime_active, 1)
-
-          with open(ime_path, "w", encoding="utf-8") as f:
-              f.write(ime)
-          print("VERIFIED: KeyboardCanvasView.kt patched with Probe Signatures!")
-
-          # 4. Update MainViewModel.kt onRawTabletTouchEvent so it logs Upper Barrel Hold (ACTION_DOWN >= 0.24f) & Sub-floor (< 0.0045f) in the Settings Monitor without swallowing canvas events!
-          vm_path = "app/src/main/java/com/example/viewmodel/MainViewModel.kt"
-          with open(vm_path, "r", encoding="utf-8") as f:
-              vm = f.read()
-
-          new_raw_touch = """fun onRawTabletTouchEvent(event: MotionEvent): Boolean {
-              val action = event.actionMasked
-              val buttonState = event.buttonState or event.actionButton
-              val pressure = if (event.pointerCount > 0) event.pressure else 0f
-              val firstP = if (event.historySize > 0) event.getHistoricalPressure(0) else pressure
-              val toolType = if (event.pointerCount > 0) event.getToolType(0) else 0
-              val dev = event.device
-
-              if (toolType == MotionEvent.TOOL_TYPE_STYLUS && buttonState == 0) {
-                  if (action == MotionEvent.ACTION_DOWN && firstP >= 0.24f) {
-                      val act = _tabletConfig.value.upperBarrelAction
-                      val msg = "Upper Barrel Held: ${act.displayName}"
-                      _tabletFeedbackMessage.value = msg
-                      _latestDebugEvent.value = HardwareInputDebugEvent(
-                          eventType = "Upper Barrel Hold (ACTION_DOWN p=${"%.2f".format(firstP)})",
-                          deviceName = dev?.name ?: "UGTABLET Deco Mini7 V2",
-                          deviceId = dev?.id ?: 0,
-                          vendorId = dev?.vendorId ?: 0x28BD,
-                          productId = dev?.productId ?: 0x0948,
-                          source = "STYLUS UPPER BARREL",
-                          buttonState = 0x40,
-                          buttonStateNames = listOf("Upper Barrel Hold (Coil Shift)"),
-                          toolType = "STYLUS",
-                          pressure = firstP,
-                          resolvedAction = msg
-                      )
-                  }
-              }
-              if (buttonState != 0 || toolType == MotionEvent.TOOL_TYPE_ERASER) {
-                  handleGenericMotionEvent(event)
-              }
-              // Always return false so HandwritingCanvas receives all (x, y) coordinates to erase!
-              return false
-          }"""
-
-          if "fun onRawTabletTouchEvent" in vm:
-              vm = replace_kotlin_fun(vm, "fun onRawTabletTouchEvent(event: MotionEvent): Boolean", new_raw_touch)
-              with open(vm_path, "w", encoding="utf-8") as f:
-                  f.write(vm)
-              print("VERIFIED: MainViewModel.kt onRawTabletTouchEvent updated!")
-          EOF
-
-      - name: Set up JDK 21
-        uses: actions/setup-java@v4
-        with:
-          java-version: '21'
-          distribution: 'temurin'
-
-      - name: Accept Android SDK Licenses
-        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
-
-      - name: Setup Gradle 9.3.1
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: '9.3.1'
-
-      - name: Generate Debug Keystore (if missing)
-        run: |
-          if [ ! -f debug.keystore ]; then
-            keytool -genkey -v -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
-          fi
-
-      - name: Build Debug APK
-        run: gradle assembleDebug --no-daemon
-
-      - name: Upload APK to Download
-        uses: actions/upload-artifact@v4
-        with:
-          name: InkKey-v2.3-debug-apk
-          path: app/build/outputs/apk/debug/*.apk
+          if start_marker in hc and end_marker in hc:
+              s_idx = hc.find(start_marker)
+              e_idx = hc.find(end_marker, s_idx) + len(end_marker)
+              hc = hc[:s_idx] + v24_upper_block
+              
