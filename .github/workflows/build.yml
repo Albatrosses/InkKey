@@ -33,6 +33,8 @@ jobs:
         run: python3 ../.github/workflows/trial9_patch.py
       - name: Apply Trial 10 strict mapping and glass lens
         run: python3 ../.github/workflows/trial10_patch.py
+      - name: Fix Trial 10 Compose lens sizing
+        run: python3 ../.github/workflows/trial10_compile_fix.py
       - name: Test recovery and build APK
         run: gradle testDebugUnitTest --tests com.example.ContactRestartDetectorTest --tests com.example.Trial7HoverDetectorTest --tests com.example.BarrelToolControllerTest --tests com.example.RecoveredInputTest --tests com.example.Trial9InputUiLogicTest assembleDebug --no-daemon
       - name: Upload APK
