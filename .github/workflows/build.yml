@@ -13,26 +13,222 @@ jobs:
       - name: Checkout Source Code
         uses: actions/checkout@v4
 
-      - name: Auto-Unzip Project (if uploaded as zip from phone)
+      - name: Auto-Unzip Project
         run: |
           if [ -f project.zip ]; then
             unzip -o project.zip
-            rm project.zip
+            rm -f project.zip
           elif [ -f inkkey.zip ]; then
             unzip -o inkkey.zip
-            rm -f inkkey.zip InkKey.apk InkKey_Source_Code.zip
+            rm -f inkkey.zip
           fi
           # If files were zipped inside a subfolder, move them to root
-          if [ ! -f settings.gradle.kts ] && [ -d inkkey ]; then
-            mv inkkey/* .
-            mv inkkey/.* . 2>/dev/null || true
+          for dir in inkkey project InkKey; do
+            if [ ! -f settings.gradle.kts ] && [ -d "$dir" ]; then
+              mv "$dir"/* . 2>/dev/null || true
+              mv "$dir"/.* . 2>/dev/null || true
+            fi
+          done
+          # If app/src is inside a nested zip, unpack it too
+          if [ -f InkKey_Source_Code.zip ]; then
+            unzip -o InkKey_Source_Code.zip
+            rm -f InkKey_Source_Code.zip
           fi
+          ls -la
 
-      - name: Apply InkKey v1.6 Fixes
+      - name: Apply InkKey v1.6 Fixes (XP-Pen Upper Barrel + Shapes + Symbols)
         run: |
-          if [ -f apply_fixes.py ]; then
-            python3 apply_fixes.py
-          fi
+          python3 - << 'EOF'
+          import os
+
+          # 1. Fix MainActivity.kt (Catch XP-Pen zero-pressure upper barrel touch events)
+          main_activity_path = "app/src/main/java/com/example/MainActivity.kt"
+          if os.path.exists(main_activity_path):
+              with open(main_activity_path, "r", encoding="utf-8") as f:
+                  code = f.read()
+
+              old_dispatch = """    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+                  val vm = mainViewModel
+                  if (vm != null && vm.handleGenericMotionEvent(event)) {
+                      return true
+                  }
+                  return super.dispatchGenericMotionEvent(event)
+              }"""
+
+              new_dispatch = """    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+                  val vm = mainViewModel
+                  val isStylusZeroPressure = event.pointerCount > 0 &&
+                          event.getToolType(0) == MotionEvent.TOOL_TYPE_STYLUS &&
+                          event.pressure <= 0.001f &&
+                          (event.actionMasked == MotionEvent.ACTION_DOWN ||
+                           event.actionMasked == MotionEvent.ACTION_MOVE ||
+                           event.actionMasked == MotionEvent.ACTION_UP)
+                  if (vm != null && (event.buttonState != 0 || event.actionButton != 0 ||
+                          (event.pointerCount > 0 && event.getToolType(0) == MotionEvent.TOOL_TYPE_ERASER) ||
+                          isStylusZeroPressure)) {
+                      vm.handleGenericMotionEvent(event)
+                  }
+                  return super.dispatchTouchEvent(event)
+              }
+
+              override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+                  val vm = mainViewModel
+                  if (vm != null && vm.handleGenericMotionEvent(event)) {
+                      return true
+                  }
+                  return super.dispatchGenericMotionEvent(event)
+              }"""
+
+              if "override fun dispatchTouchEvent" not in code:
+                  code = code.replace(old_dispatch, new_dispatch)
+                  with open(main_activity_path, "w", encoding="utf-8") as f:
+                      f.write(code)
+                  print("Patched MainActivity.kt")
+
+          # 2. Fix TabletModels.kt (Default upperBarrelAction to STROKE_ERASER)
+          tablet_models_path = "app/src/main/java/com/example/model/TabletModels.kt"
+          if os.path.exists(tablet_models_path):
+              with open(tablet_models_path, "r", encoding="utf-8") as f:
+                  code = f.read()
+              code = code.replace(
+                  "val upperBarrelAction: TabletAction = TabletAction.HAND,",
+                  "val upperBarrelAction: TabletAction = TabletAction.STROKE_ERASER,"
+              ).replace(
+                  'val upperActionId = prefs.getString("upper_barrel_action", TabletAction.HAND.id)',
+                  'val upperActionId = prefs.getString("upper_barrel_action", TabletAction.STROKE_ERASER.id)'
+              ).replace(
+                  "val upperAction = TabletAction.values().find { it.id == upperActionId } ?: TabletAction.HAND",
+                  "val upperAction = TabletAction.values().find { it.id == upperActionId } ?: TabletAction.STROKE_ERASER"
+              )
+              with open(tablet_models_path, "w", encoding="utf-8") as f:
+                  f.write(code)
+              print("Patched TabletModels.kt")
+
+          # 3. Fix HandwritingCanvas.kt (Zero-pressure Upper Barrel Eraser + Easy Symbol Selection)
+          canvas_path = "app/src/main/java/com/example/ui/canvas/HandwritingCanvas.kt"
+          if os.path.exists(canvas_path):
+              with open(canvas_path, "r", encoding="utf-8") as f:
+                  code = f.read()
+
+              target_line = "val buttonState = motionEvent.buttonState"
+              replacement = """val buttonState = motionEvent.buttonState
+                          val isZeroPressureUpperBarrel = (toolType == MotionEvent.TOOL_TYPE_STYLUS) &&
+                                  !isHardwareEraser &&
+                                  buttonState == 0 &&
+                                  motionEvent.pressure <= 0.001f &&
+                                  (motionEvent.actionMasked == MotionEvent.ACTION_DOWN || motionEvent.actionMasked == MotionEvent.ACTION_MOVE)
+
+                          if (isZeroPressureUpperBarrel) {
+                              if (motionEvent.actionMasked == MotionEvent.ACTION_DOWN && !prevBarrel2Pressed) {
+                                  prevBarrel2Pressed = true
+                                  val nextTool = if (currentTool == ToolType.AREA_ERASER || currentTool == ToolType.STROKE_ERASER) {
+                                      ToolType.PEN
+                                  } else {
+                                      if (tabletConfig.upperBarrelAction == com.example.model.TabletAction.AREA_ERASER) ToolType.AREA_ERASER else ToolType.STROKE_ERASER
+                                  }
+                                  viewModel.setTool(nextTool)
+                              }
+                              return@pointerInteropFilter true
+                          }
+                          if (motionEvent.actionMasked == MotionEvent.ACTION_UP || motionEvent.actionMasked == MotionEvent.ACTION_CANCEL) {
+                              prevBarrel1Pressed = false
+                              prevBarrel2Pressed = false
+                          }"""
+
+              if "isZeroPressureUpperBarrel" not in code:
+                  code = code.replace(target_line, replacement, 1)
+              code = code.replace("sym.hitTest(canvasX, canvasY, padding = 8f)", "sym.hitTest(canvasX, canvasY, padding = 22f)")
+              with open(canvas_path, "w", encoding="utf-8") as f:
+                  f.write(code)
+              print("Patched HandwritingCanvas.kt")
+
+          # 4. Fix KeyboardCanvasView.kt (Zero-pressure Upper Barrel Eraser in IME Keyboard + Easy Symbol Selection)
+          ime_canvas_path = "app/src/main/java/com/example/ime/ui/KeyboardCanvasView.kt"
+          if os.path.exists(ime_canvas_path):
+              with open(ime_canvas_path, "r", encoding="utf-8") as f:
+                  code = f.read()
+
+              old_ime = """val pressure = motionEvent.pressure
+                                      val buttonState = motionEvent.buttonState"""
+              new_ime = """val pressure = motionEvent.pressure
+                                      val buttonState = motionEvent.buttonState
+                                      val isZeroPressureUpper = (toolType == MotionEvent.TOOL_TYPE_STYLUS) &&
+                                              !isEraserHardware &&
+                                              buttonState == 0 &&
+                                              pressure <= 0.001f &&
+                                              (motionEvent.actionMasked == MotionEvent.ACTION_DOWN || motionEvent.actionMasked == MotionEvent.ACTION_MOVE)
+
+                                      if (isZeroPressureUpper) {
+                                          if (motionEvent.actionMasked == MotionEvent.ACTION_DOWN) {
+                                              val toggled = if (currentTool == ToolType.STROKE_ERASER || currentTool == ToolType.AREA_ERASER) ToolType.PEN else ToolType.STROKE_ERASER
+                                              repository.setTool(toggled)
+                                              notificationMessage = if (toggled == ToolType.PEN) "Switched to Pen" else "Switched to Eraser"
+                                          }
+                                          return@pointerInteropFilter true
+                                      }"""
+              if "isZeroPressureUpper" not in code:
+                  code = code.replace(old_ime, new_ime, 1)
+              code = code.replace("isBarrel2 -> ToolType.HAND", "isBarrel2 -> ToolType.STROKE_ERASER")
+              code = code.replace("hitTestSymbol(sym, canvasX, canvasY, padding = 8f)", "hitTestSymbol(sym, canvasX, canvasY, padding = 20f)")
+              with open(ime_canvas_path, "w", encoding="utf-8") as f:
+                  f.write(code)
+              print("Patched KeyboardCanvasView.kt")
+
+          # 5. Fix ShapeRecognizer.kt (Honor selected shape type & relax freehand shape detection)
+          shape_path = "app/src/main/java/com/example/util/ShapeRecognizer.kt"
+          if os.path.exists(shape_path):
+              with open(shape_path, "r", encoding="utf-8") as f:
+                  code = f.read()
+
+              old_start = """    fun recognizeAndSnap(stroke: DrawingStroke): DrawingStroke {
+                  val points = stroke.points
+                  if (points.size < 6) return stroke // too short to classify as shape"""
+
+              new_start = """    fun recognizeAndSnap(stroke: DrawingStroke): DrawingStroke {
+                  val points = stroke.points
+                  if (points.size < 3) return stroke
+                  if (stroke.shapeType != ShapeType.NONE) {
+                      val s = points.first()
+                      val e = points.last()
+                      val minX = points.minOf { it.x }
+                      val maxX = points.maxOf { it.x }
+                      val minY = points.minOf { it.y }
+                      val maxY = points.maxOf { it.y }
+                      val cx = (minX + maxX) / 2f
+                      val cy = (minY + maxY) / 2f
+                      when (stroke.shapeType) {
+                          ShapeType.LINE -> return stroke.copy(points = listOf(DrawingPoint(s.x, s.y), DrawingPoint(e.x, e.y)), isShape = true, shapeType = ShapeType.LINE)
+                          ShapeType.RECTANGLE -> return stroke.copy(points = listOf(DrawingPoint(minX, minY), DrawingPoint(maxX, minY), DrawingPoint(maxX, maxY), DrawingPoint(minX, maxY), DrawingPoint(minX, minY)), isShape = true, shapeType = ShapeType.RECTANGLE)
+                          ShapeType.TRIANGLE -> return stroke.copy(points = listOf(DrawingPoint(cx, minY), DrawingPoint(maxX, maxY), DrawingPoint(minX, maxY), DrawingPoint(cx, minY)), isShape = true, shapeType = ShapeType.TRIANGLE)
+                          ShapeType.CIRCLE -> {
+                              val r = max(maxX - minX, maxY - minY) / 2f
+                              val cPts = (0..48).map { idx ->
+                                  val ang = 2f * PI.toFloat() * idx / 48
+                                  DrawingPoint(cx + r * cos(ang), cy + r * sin(ang), 1f)
+                              }
+                              return stroke.copy(points = cPts, isShape = true, shapeType = ShapeType.CIRCLE)
+                          }
+                          ShapeType.ELLIPSE -> {
+                              val a = (maxX - minX) / 2f
+                              val b = (maxY - minY) / 2f
+                              val ePts = (0..48).map { idx ->
+                                  val ang = 2f * PI.toFloat() * idx / 48
+                                  DrawingPoint(cx + a * cos(ang), cy + b * sin(ang), 1f)
+                              }
+                              return stroke.copy(points = ePts, isShape = true, shapeType = ShapeType.ELLIPSE)
+                          }
+                          else -> {}
+                      }
+                  }
+                  if (points.size < 6) return stroke"""
+
+              code = code.replace(old_start, new_start)
+              code = code.replace("cv < 0.13f && angularCoverage >= 315f", "cv < 0.22f && angularCoverage >= 275f")
+              code = code.replace("straightnessRatio >= 0.90f", "straightnessRatio >= 0.85f")
+              with open(shape_path, "w", encoding="utf-8") as f:
+                  f.write(code)
+              print("Patched ShapeRecognizer.kt")
+          EOF
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -40,8 +236,8 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Accept Android SDK Licenses
+        run: yes | $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager --licenses || true
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
@@ -55,11 +251,10 @@ jobs:
           fi
 
       - name: Build Debug APK
-        run: gradle assembleDebug --no-daemon
+        run: gradle assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK to Download
         uses: actions/upload-artifact@v4
         with:
           name: InkKey-v1.6-debug-apk
           path: app/build/outputs/apk/debug/*.apk
-          
