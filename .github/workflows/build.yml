@@ -25,6 +25,8 @@ jobs:
           keytool -genkeypair -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
       - name: Apply Trial 7 source patch
         run: python3 ../.github/workflows/trial7_patch.py
+      - name: Fix Trial 7 IME root host
+        run: python3 ../.github/workflows/trial7_root_fix.py
       - name: Test input recovery and build APK
         run: gradle testDebugUnitTest --tests com.example.ContactRestartDetectorTest --tests com.example.Trial7HoverDetectorTest --tests com.example.BarrelToolControllerTest --tests com.example.RecoveredInputTest assembleDebug --no-daemon
       - name: Upload APK
