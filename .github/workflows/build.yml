@@ -1,15 +1,16 @@
-name: InkKey Upper Button Probe
-
-permissions:
-  contents: read
+name: Build InkKey APK
 
 on:
+  push:
+    branches: [ "main", "master" ]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
 
     steps:
       - name: Checkout Source Code
@@ -17,7 +18,6 @@ jobs:
 
       - name: Auto-Unzip Project
         run: |
-          curl -fL --retry 2 https://raw.githubusercontent.com/Albatrosses/InkKey/18ea1e5f27f65db387cbbb6effc0a2d00a7623ac/project.zip -o project.zip
           if [ -f project.zip ]; then
             unzip -o project.zip
             rm -f project.zip
@@ -35,6 +35,7 @@ jobs:
             unzip -o InkKey_Source_Code.zip
             rm -f InkKey_Source_Code.zip
           fi
+          rm -f InkKey.apk
           if [ ! -f .env ]; then
             cp .env.example .env 2>/dev/null || echo "GEMINI_API_KEY=placeholder" > .env
           fi
@@ -42,187 +43,199 @@ jobs:
             echo "GEMINI_API_KEY=placeholder" > .env.example
           fi
 
-      - name: Recreate v1.8 baseline
+      - name: Apply InkKey v2.2 Fixes
         run: |
           python3 - << 'EOF'
-          import os, re
+          import os, sys
 
-          # 1. Update version to 1.8 in app/build.gradle.kts
-          app_gradle_path = "app/build.gradle.kts"
-          with open(app_gradle_path, "r", encoding="utf-8") as f:
+          # 1. Update version to 2.2
+          with open("app/build.gradle.kts", "r", encoding="utf-8") as f:
               bg = f.read()
-          bg = bg.replace('versionCode = 4', 'versionCode = 8').replace('versionName = "1.3"', 'versionName = "1.8"')
-          with open(app_gradle_path, "w", encoding="utf-8") as f:
+          bg = bg.replace('versionCode = 4', 'versionCode = 12').replace('versionName = "1.3"', 'versionName = "2.2"')
+          with open("app/build.gradle.kts", "w", encoding="utf-8") as f:
               f.write(bg)
-          print("1. SUCCESSFULLY PATCHED app/build.gradle.kts")
 
-          # 2. Patch MainActivity.kt (Intercept ALL Touch + GenericMotion + Key events for 0x28BD:0x0948)
-          main_activity_path = "app/src/main/java/com/example/MainActivity.kt"
-          with open(main_activity_path, "r", encoding="utf-8") as f:
-              code = f.read()
+          # 2. Patch MainActivity.kt (Intercept KeyEvents, TouchEvents, and GenericMotionEvents)
+          ma_path = "app/src/main/java/com/example/MainActivity.kt"
+          with open(ma_path, "r", encoding="utf-8") as f:
+              ma = f.read()
 
-          new_methods = """    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+          old_ma = """    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
               val vm = mainViewModel
-              if (vm != null && vm.handleTouchMotionEvent(event)) {
+              if (vm != null && vm.handleHardwareKeyEvent(event.keyCode, event.scanCode, event)) {
+                  return true
+              }
+              return super.dispatchKeyEvent(event)
+          }
+          override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+              val vm = mainViewModel
+              if (vm != null && vm.handleGenericMotionEvent(event)) {
+                  return true
+              }
+              return super.dispatchGenericMotionEvent(event)
+          }"""
+
+          new_ma = """    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+              val vm = mainViewModel
+              if (vm != null && vm.handleHardwareKeyEvent(event.keyCode, event.scanCode, event)) {
+                  return true
+              }
+              return super.dispatchKeyEvent(event)
+          }
+
+          override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+              val vm = mainViewModel
+              if (vm != null && vm.onRawTabletTouchEvent(event)) {
                   return true
               }
               return super.dispatchTouchEvent(event)
           }
 
-          override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {"""
+          override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
+              val vm = mainViewModel
+              if (vm != null && vm.handleGenericMotionEvent(event)) {
+                  return true
+              }
+              return super.dispatchGenericMotionEvent(event)
+          }"""
 
-          if "override fun dispatchTouchEvent" not in code:
-              code = code.replace("    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {", new_methods, 1)
-              with open(main_activity_path, "w", encoding="utf-8") as f:
-                  f.write(code)
-              print("2. SUCCESSFULLY PATCHED MainActivity.kt")
+          if "onRawTabletTouchEvent" not in ma:
+              ma = ma.replace("    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {", """    override fun dispatchTouchEvent(event: MotionEvent): Boolean {
+              val vm = mainViewModel
+              if (vm != null && vm.onRawTabletTouchEvent(event)) {
+                  return true
+              }
+              return super.dispatchTouchEvent(event)
+          }
 
-          # 3. Patch MainViewModel.kt:
-          #    - Add handleTouchMotionEvent(event: MotionEvent) to catch 0% pressure ACTION_DOWN / ACTION_MOVE
-          #    - Stop empty ACTION_HOVER_MOVE (buttonState == 0) from overwriting the Hardware Input Monitor!
-          #    - Make Upper Barrel toggle Eraser cleanly without hover events canceling it
+          override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {""", 1)
+              with open(ma_path, "w", encoding="utf-8") as f:
+                  f.write(ma)
+
+          # 3. Patch MainViewModel.kt safely (injects onRawTabletTouchEvent without removing any existing variables!)
           vm_path = "app/src/main/java/com/example/viewmodel/MainViewModel.kt"
           with open(vm_path, "r", encoding="utf-8") as f:
               vm = f.read()
 
-          custom_vm_handler = """    private var lastUpperBarrelToggleTime = 0L
-          private var zeroPressureStrokeActive = false
+          inject_vm = """    private var upperBarrelZeroPressureActive = false
+          private var upperBarrelStartX = 0f
+          private var upperBarrelStartY = 0f
+          private var lastUpperBarrelClickMs = 0L
 
-          fun handleTouchMotionEvent(event: MotionEvent): Boolean {
+          fun onRawTabletTouchEvent(event: MotionEvent): Boolean {
               val action = event.actionMasked
-              val buttonState = event.buttonState or (try { event.actionButton } catch (e: Exception) { 0 })
+              val buttonState = event.buttonState or event.actionButton
               val pressure = if (event.pointerCount > 0) event.pressure else 0f
-              val toolTypeInt = if (event.pointerCount > 0) event.getToolType(0) else 0
+              val toolType = if (event.pointerCount > 0) event.getToolType(0) else 0
               val dev = event.device
-              val isXpPen = (dev?.vendorId == 0x28BD) || (dev?.name?.contains("Deco", ignoreCase = true) == true) || (dev?.name?.contains("UGTABLET", ignoreCase = true) == true) || (toolTypeInt == MotionEvent.TOOL_TYPE_STYLUS)
+              val isStylusOrTablet = (toolType == MotionEvent.TOOL_TYPE_STYLUS) ||
+                      (toolType == MotionEvent.TOOL_TYPE_MOUSE) ||
+                      (dev?.vendorId == 0x28BD) ||
+                      (dev?.name?.contains("Deco", ignoreCase = true) == true) ||
+                      (dev?.name?.contains("UGTABLET", ignoreCase = true) == true)
 
-              // XP-Pen Deco Mini 7 V2 Upper Barrel Button sends ACTION_DOWN / ACTION_MOVE with 0% pressure (pressure <= 0.002f) and buttonState == 0!
-              if (isXpPen && buttonState == 0 && pressure <= 0.002f && toolTypeInt != MotionEvent.TOOL_TYPE_ERASER) {
-                  if (action == MotionEvent.ACTION_DOWN || (action == MotionEvent.ACTION_MOVE && !zeroPressureStrokeActive)) {
-                      zeroPressureStrokeActive = true
+              if (buttonState != 0 || toolType == MotionEvent.TOOL_TYPE_ERASER) {
+                  handleGenericMotionEvent(event)
+              }
+
+              // XP-Pen Upper Barrel sends ACTION_DOWN with 0% pressure (pressure == 0.0f)
+              if (action == MotionEvent.ACTION_DOWN) {
+                  if (isStylusOrTablet && buttonState == 0 && toolType != MotionEvent.TOOL_TYPE_ERASER && pressure <= 0.0005f) {
+                      upperBarrelZeroPressureActive = true
+                      upperBarrelStartX = event.x
+                      upperBarrelStartY = event.y
+
                       val now = System.currentTimeMillis()
-                      if (now - lastUpperBarrelToggleTime > 300L) {
-                          lastUpperBarrelToggleTime = now
+                      if (now - lastUpperBarrelClickMs > 250L) {
+                          lastUpperBarrelClickMs = now
                           val nextTool = if (_currentTool.value == ToolType.STROKE_ERASER || _currentTool.value == ToolType.AREA_ERASER) {
                               ToolType.PEN
                           } else {
                               if (_tabletConfig.value.upperBarrelAction == TabletAction.AREA_ERASER) ToolType.AREA_ERASER else ToolType.STROKE_ERASER
                           }
                           setTool(nextTool)
-                          val msg = if (nextTool == ToolType.PEN) "Upper Barrel: Switched to Pen" else "Upper Barrel: Switched to ${if (nextTool == ToolType.AREA_ERASER) "Area " else "Stroke "}Eraser"
+                          val msg = if (nextTool == ToolType.PEN) {
+                              "Upper Barrel: Switched to Pen"
+                          } else {
+                              "Upper Barrel: Switched to ${if (nextTool == ToolType.AREA_ERASER) "Area " else "Stroke "}Eraser"
+                          }
                           _tabletFeedbackMessage.value = msg
                           _latestDebugEvent.value = HardwareInputDebugEvent(
-                              eventType = "MotionEvent (${MotionEvent.actionToString(action)} - 0% Pressure)",
+                              eventType = "Upper Barrel (ACTION_DOWN 0% Pressure)",
                               deviceName = dev?.name ?: "UGTABLET Deco Mini7 V2",
                               deviceId = dev?.id ?: 0,
                               vendorId = dev?.vendorId ?: 0x28BD,
                               productId = dev?.productId ?: 0x0948,
-                              source = "STYLUS UPPER BARREL (0% Pressure)",
+                              source = "UPPER BARREL (0% Pressure)",
                               buttonState = 0x40,
-                              buttonStateNames = listOf("Upper Barrel (0% Pressure Touch)"),
-                              toolType = "STYLUS",
+                              buttonStateNames = listOf("Upper Barrel (0% Pressure)"),
+                              toolType = "TOOL_$toolType",
                               pressure = pressure,
                               resolvedAction = msg
                           )
                       }
                       return true
+                  } else {
+                      upperBarrelZeroPressureActive = false
                   }
-                  if (action == MotionEvent.ACTION_MOVE && zeroPressureStrokeActive) {
+              } else if (action == MotionEvent.ACTION_MOVE && upperBarrelZeroPressureActive) {
+                  if (pressure <= 0.0005f) {
+                      val dist = kotlin.math.hypot(event.x - upperBarrelStartX, event.y - upperBarrelStartY)
+                      if (dist > 6f) {
+                          val cx = (event.x - _panOffset.value.x) / _zoomScale.value
+                          val cy = (event.y - _panOffset.value.y) / _zoomScale.value
+                          if (_tabletConfig.value.upperBarrelAction == TabletAction.AREA_ERASER) {
+                              eraseAreaStrokes(cx, cy, _eraserSize.value.radius)
+                          } else {
+                              eraseStrokesNear(cx, cy, _eraserSize.value.radius)
+                          }
+                      }
                       return true
+                  } else {
+                      upperBarrelZeroPressureActive = false
                   }
-              }
-
-              if (action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) {
-                  if (zeroPressureStrokeActive) {
-                      zeroPressureStrokeActive = false
-                      return true
-                  }
-              }
-
-              // Also log any stylus touch with buttonState != 0 to the monitor
-              if (buttonState != 0 || toolTypeInt == MotionEvent.TOOL_TYPE_ERASER) {
-                  handleGenericMotionEvent(event)
+              } else if ((action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) && upperBarrelZeroPressureActive) {
+                  upperBarrelZeroPressureActive = false
+                  return true
               }
               return false
           }
 
           fun handleGenericMotionEvent(event: MotionEvent): Boolean {"""
 
-          if "fun handleTouchMotionEvent" not in vm:
-              vm = vm.replace("    fun handleGenericMotionEvent(event: MotionEvent): Boolean {", custom_vm_handler, 1)
+          if "fun onRawTabletTouchEvent" not in vm:
+              vm = vm.replace("    fun handleGenericMotionEvent(event: MotionEvent): Boolean {", inject_vm, 1)
 
-          # Stop empty ACTION_HOVER_MOVE (when buttonState == 0) from overwriting _latestDebugEvent in the Hardware Monitor!
-          vm = vm.replace(
-              "if (buttonState != 0 || event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS || event.actionMasked == MotionEvent.ACTION_HOVER_MOVE) {",
-              "if (buttonState != 0 || event.actionMasked == MotionEvent.ACTION_BUTTON_PRESS || isEraserTool) {"
-          )
-
-          # Also include BUTTON_SECONDARY (2) in rawUpper inside MainViewModel
-          vm = vm.replace(
-              "MotionEvent.BUTTON_STYLUS_SECONDARY or MotionEvent.BUTTON_TERTIARY",
-              "MotionEvent.BUTTON_STYLUS_SECONDARY or MotionEvent.BUTTON_SECONDARY or MotionEvent.BUTTON_TERTIARY"
-          )
-
+          # Stop empty ACTION_HOVER_MOVE from overwriting the monitor
+          vm = vm.replace("|| event.actionMasked == MotionEvent.ACTION_HOVER_MOVE", "")
           with open(vm_path, "w", encoding="utf-8") as f:
               f.write(vm)
-          print("3. SUCCESSFULLY PATCHED MainViewModel.kt")
 
-          # 4. Patch TabletModels.kt (Default upperBarrelAction to STROKE_ERASER & reset minPressure if accidentally set to 50%)
-          tablet_models_path = "app/src/main/java/com/example/model/TabletModels.kt"
-          with open(tablet_models_path, "r", encoding="utf-8") as f:
+          # 4. Patch TabletModels.kt, HandwritingCanvas.kt, KeyboardCanvasView.kt, ShapeRecognizer.kt
+          tm_path = "app/src/main/java/com/example/model/TabletModels.kt"
+          with open(tm_path, "r", encoding="utf-8") as f:
               tm = f.read()
           tm = tm.replace("val upperBarrelAction: TabletAction = TabletAction.HAND", "val upperBarrelAction: TabletAction = TabletAction.STROKE_ERASER")
           tm = tm.replace("TabletAction.HAND.id", "TabletAction.STROKE_ERASER.id")
           tm = tm.replace("?: TabletAction.HAND", "?: TabletAction.STROKE_ERASER")
-          with open(tablet_models_path, "w", encoding="utf-8") as f:
+          with open(tm_path, "w", encoding="utf-8") as f:
               f.write(tm)
-          print("4. SUCCESSFULLY PATCHED TabletModels.kt")
 
-          # 5. Patch HandwritingCanvas.kt (Catch 0% pressure upper barrel packet before drawing + widen symbol hit box)
-          canvas_path = "app/src/main/java/com/example/ui/canvas/HandwritingCanvas.kt"
-          with open(canvas_path, "r", encoding="utf-8") as f:
+          hc_path = "app/src/main/java/com/example/ui/canvas/HandwritingCanvas.kt"
+          with open(hc_path, "r", encoding="utf-8") as f:
               hc = f.read()
-
-          hc_target = "val pointerCount = motionEvent.pointerCount"
-          hc_inject = """val pointerCount = motionEvent.pointerCount
-                      if (pointerCount == 1 && !isHardwareEraser && motionEvent.buttonState == 0 && motionEvent.pressure <= 0.002f) {
-                          if (viewModel.handleTouchMotionEvent(motionEvent)) {
-                              return@pointerInteropFilter true
-                          }
-                      }"""
-          if "viewModel.handleTouchMotionEvent" not in hc:
-              hc = hc.replace(hc_target, hc_inject, 1)
-
           hc = hc.replace("sym.hitTest(canvasX, canvasY, padding = 8f)", "sym.hitTest(canvasX, canvasY, padding = 24f)")
-          with open(canvas_path, "w", encoding="utf-8") as f:
+          with open(hc_path, "w", encoding="utf-8") as f:
               f.write(hc)
-          print("5. SUCCESSFULLY PATCHED HandwritingCanvas.kt")
 
-          # 6. Patch KeyboardCanvasView.kt (Catch 0% pressure upper barrel packet in IME Keyboard too!)
           ime_path = "app/src/main/java/com/example/ime/ui/KeyboardCanvasView.kt"
           with open(ime_path, "r", encoding="utf-8") as f:
               ime = f.read()
-
-          ime_target = "val buttonState = motionEvent.buttonState"
-          ime_inject = """val buttonState = motionEvent.buttonState
-                                  if (!isEraserHardware && buttonState == 0 && pressure <= 0.002f) {
-                                      if (motionEvent.actionMasked == MotionEvent.ACTION_DOWN) {
-                                          val toggled = if (currentTool == ToolType.STROKE_ERASER || currentTool == ToolType.AREA_ERASER) ToolType.PEN else ToolType.STROKE_ERASER
-                                          repository.setTool(toggled)
-                                          notificationMessage = if (toggled == ToolType.PEN) "Upper Barrel: Switched to Pen" else "Upper Barrel: Switched to Eraser"
-                                      }
-                                      return@pointerInteropFilter true
-                                  }"""
-          if "Upper Barrel: Switched to Eraser" not in ime:
-              ime = ime.replace(ime_target, ime_inject, 1)
-
           ime = ime.replace("isBarrel2 -> ToolType.HAND", "isBarrel2 -> ToolType.STROKE_ERASER")
           ime = ime.replace("hitTestSymbol(sym, canvasX, canvasY, padding = 8f)", "hitTestSymbol(sym, canvasX, canvasY, padding = 22f)")
           with open(ime_path, "w", encoding="utf-8") as f:
               f.write(ime)
-          print("6. SUCCESSFULLY PATCHED KeyboardCanvasView.kt")
 
-          # 7. Patch ShapeRecognizer.kt
           shape_path = "app/src/main/java/com/example/util/ShapeRecognizer.kt"
           with open(shape_path, "r", encoding="utf-8") as f:
               sr = f.read()
@@ -267,37 +280,17 @@ jobs:
           sr = sr.replace("straightnessRatio >= 0.90f", "straightnessRatio >= 0.85f")
           with open(shape_path, "w", encoding="utf-8") as f:
               f.write(sr)
-          print("7. SUCCESSFULLY PATCHED ShapeRecognizer.kt")
           EOF
 
-      - name: Prepare isolated button probe
+      - name: Save Unpacked Source Files to GitHub Repo (One-Time Cleanup)
         run: |
-          python3 - << 'PROBE'
-          from pathlib import Path
-          import re
-          
-          root = Path('.')
-          gradle = root / 'app/build.gradle.kts'
-          code = gradle.read_text()
-          assert 'applicationId = "com.aistudio.inkkey.vzqwx"' in code
-          code = code.replace('applicationId = "com.aistudio.inkkey.vzqwx"', 'applicationId = "com.aistudio.inkkey.barrelprobe"')
-          code = re.sub(r'versionCode = \d+', 'versionCode = 1', code, count=1)
-          code = re.sub(r'versionName = "[^"]+"', 'versionName = "1.8-probe-1"', code, count=1)
-          gradle.write_text(code)
-          
-          manifest = root / 'app/src/main/AndroidManifest.xml'
-          code = manifest.read_text()
-          assert 'android:name=".MainActivity"' in code
-          code = code.replace('android:name=".MainActivity"', 'android:name=".ui.settings.BarrelProbeActivity"', 1)
-          code = code.replace('android:label="@string/app_name"', 'android:label="InkKey Button Probe"')
-          # The probe is a separate test app; do not offer it as a replacement keyboard.
-          code = re.sub(r'\s*<service\s+android:name="\.ime\.InkKeyInputMethodService"[\s\S]*?</service>', '', code, count=1)
-          manifest.write_text(code)
-          
-          target = root / 'app/src/main/java/com/example/ui/settings/BarrelProbeActivity.kt'
-          target.write_text('package com.example.ui.settings\n\nimport android.content.Intent\nimport android.graphics.Canvas\nimport android.graphics.Color\nimport android.graphics.Paint\nimport android.os.Bundle\nimport android.os.SystemClock\nimport android.view.KeyEvent\nimport android.view.MotionEvent\nimport android.view.View\nimport android.widget.Button\nimport android.widget.LinearLayout\nimport android.widget.TextView\nimport androidx.activity.ComponentActivity\nimport androidx.core.content.FileProvider\nimport java.io.File\nimport java.util.ArrayDeque\n\n/** Records actual Android events; a pressure heuristic is never labelled a hardware button. */\nclass BarrelProbeActivity : ComponentActivity() {\n    private val rows = ArrayDeque<String>()\n    private var phase = "idle"\n    private var samples = 0\n    private var switches = 0\n    private var lowStroke = false\n    private var lastToggle = 0L\n    private var eraser = false\n    private var lastHover = 0L\n    private lateinit var status: TextView\n    private lateinit var pad: ProbePad\n    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; strokeWidth = 5f }\n\n    override fun onCreate(savedInstanceState: Bundle?) {\n        super.onCreate(savedInstanceState)\n        val layout = LinearLayout(this).apply { orientation = LinearLayout.VERTICAL; setPadding(16, 28, 16, 16); setBackgroundColor(Color.rgb(20, 24, 32)) }\n        layout.setOnApplyWindowInsetsListener { view, insets ->\n            view.setPadding(16, insets.systemWindowInsetTop + 16, 16, insets.systemWindowInsetBottom + 16)\n            insets\n        }\n        layout.addView(TextView(this).apply {\n            text = "InkKey Button Probe\\n1. Record normal: tap 15 times without buttons.\\n2. Record upper-held: hold upper and tap 15 times.\\n3. Share results. Keep the tip hovering between taps.\\nYou can also test upper presses while hovering."\n            setTextColor(Color.WHITE); textSize = 16f\n        })\n        status = TextView(this).apply { setTextColor(Color.CYAN); textSize = 16f }\n        layout.addView(status)\n        val buttons = LinearLayout(this)\n        buttons.addView(Button(this).apply { text = "Record normal"; setOnClickListener { begin("NORMAL_NO_BUTTON") } }, LinearLayout.LayoutParams(0, -2, 1f))\n        buttons.addView(Button(this).apply { text = "Record upper-held"; setOnClickListener { begin("UPPER_HELD") } }, LinearLayout.LayoutParams(0, -2, 1f))\n        layout.addView(buttons)\n        pad = ProbePad()\n        layout.addView(pad, LinearLayout.LayoutParams(-1, 0, 1f))\n        layout.addView(Button(this).apply { text = "Stop and share results"; setOnClickListener { share() } })\n        setContentView(layout)\n        append("InkKey Button Probe 1; original v1.8 trigger replay; pressure<=0.002; no USB access or input injection")\n        updateStatus()\n    }\n\n    private fun begin(next: String) {\n        if (phase != "idle") append("PHASE_END events=$samples switches=$switches")\n        phase = next; samples = 0; switches = 0; lowStroke = false; lastToggle = 0L; eraser = false\n        pad.clear()\n        append("PHASE_START $phase")\n        updateStatus()\n    }\n\n    private fun xp(dev: android.view.InputDevice?): Boolean = dev != null &&\n        ((dev.vendorId == 0x28bd && dev.productId == 0x0948) || dev.name.contains("UGTABLET Deco Mini7 V2", ignoreCase = true))\n\n    override fun dispatchTouchEvent(event: MotionEvent): Boolean {\n        record("TOUCH", event)\n        return super.dispatchTouchEvent(event)\n    }\n\n    override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {\n        record("GENERIC", event)\n        return super.dispatchGenericMotionEvent(event)\n    }\n\n    override fun dispatchKeyEvent(event: KeyEvent): Boolean {\n        if (phase != "idle" && xp(event.device)) append("KEY action=${event.action} key=${event.keyCode} scan=${event.scanCode} repeat=${event.repeatCount} source=${event.source}")\n        return super.dispatchKeyEvent(event)\n    }\n\n    private fun record(route: String, e: MotionEvent) {\n        if (phase == "idle" || !xp(e.device) || e.pointerCount == 0) return\n        val d = e.device ?: return\n        if (e.actionMasked == MotionEvent.ACTION_HOVER_MOVE && e.buttonState == 0) {\n            if (e.eventTime - lastHover < 100L) return\n            lastHover = e.eventTime\n        }\n        if (samples == 0) append("DEVICE name=${d.name} vendor=${d.vendorId} product=${d.productId} descriptor=${d.descriptor} sources=${d.sources} ranges=${d.motionRanges.joinToString { "${it.axis}:${it.min}:${it.max}:${it.resolution}" }}")\n        samples++\n        val type = e.getToolType(0)\n        val buttons = e.buttonState or e.actionButton\n        val pressure = e.getPressure(0)\n        val axes = d.motionRanges.joinToString(",") { "${it.axis}=${e.getAxisValue(it.axis, 0)}" }\n        val history = (0 until e.historySize).joinToString(";") { h -> "${e.getHistoricalEventTime(h)}:${e.getHistoricalPressure(0,h)}:${e.getHistoricalX(0,h)}:${e.getHistoricalY(0,h)}" }\n        append("EVENT route=$route time=${e.eventTime} down=${e.downTime} action=${MotionEvent.actionToString(e.actionMasked)} device=${d.id} source=${e.source} pointers=${e.pointerCount} tool=$type buttons=${e.buttonState} actionButton=${e.actionButton} pressure=$pressure x=${e.x} y=${e.y} flags=${e.flags} axes=[$axes] history=[$history]")\n        // Replay v1.8\'s predicate, but report it honestly as a heuristic, not raw button state.\n        if (route == "TOUCH" && buttons == 0 && pressure <= 0.002f && type != MotionEvent.TOOL_TYPE_ERASER) {\n            if (e.actionMasked == MotionEvent.ACTION_DOWN || (e.actionMasked == MotionEvent.ACTION_MOVE && !lowStroke)) {\n                lowStroke = true\n                val now = SystemClock.uptimeMillis()\n                if (now - lastToggle > 300L) {\n                    lastToggle = now; eraser = !eraser; switches++\n                    append("V18_TRIGGER time=${e.eventTime} pressure=$pressure tool=$type switchedTo=${if(eraser) "ERASER" else "PEN"}")\n                    updateStatus()\n                }\n            }\n        }\n        if (route == "TOUCH" && (e.actionMasked == MotionEvent.ACTION_UP || e.actionMasked == MotionEvent.ACTION_CANCEL)) lowStroke = false\n    }\n\n    private fun append(line: String) {\n        if (rows.size >= 6000) rows.removeFirst()\n        rows.addLast("${SystemClock.uptimeMillis()} phase=$phase $line")\n    }\n\n    private fun updateStatus() {\n        status.text = "Phase: $phase\\nv1.8 heuristic switches: $switches · ${if(eraser) "Eraser" else "Pen"}"\n    }\n\n    private fun share() {\n        append("PHASE_STOP events=$samples switches=$switches")\n        phase = "idle"\n        val file = File(cacheDir, "inkkey-button-probe.txt")\n        file.writeText(rows.joinToString("\\n"))\n        val uri = FileProvider.getUriForFile(this, "$packageName.fileprovider", file)\n        startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {\n            type = "text/plain"\n            putExtra(Intent.EXTRA_STREAM, uri)\n            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)\n        }, "Share button test"))\n        updateStatus()\n    }\n\n    private inner class ProbePad : View(this@BarrelProbeActivity) {\n        private val points = ArrayList<Pair<Float, Float>>()\n        fun clear() { points.clear(); invalidate() }\n        override fun onDraw(canvas: Canvas) {\n            canvas.drawColor(Color.BLACK)\n            points.forEach { canvas.drawCircle(it.first, it.second, 3f, paint) }\n        }\n        override fun onTouchEvent(event: MotionEvent): Boolean {\n            if (xp(event.device) && event.pointerCount > 0 && event.pressure > 0.002f &&\n                (event.actionMasked == MotionEvent.ACTION_DOWN || event.actionMasked == MotionEvent.ACTION_MOVE)) {\n                if(points.size >= 10000) points.clear()\n                points.add(event.x to event.y); invalidate()\n            }\n            if(event.actionMasked == MotionEvent.ACTION_UP) performClick()\n            return true\n        }\n        override fun onGenericMotionEvent(event: MotionEvent): Boolean = true\n        override fun performClick(): Boolean { super.performClick(); return true }\n    }\n}\n')
-          print('Button probe prepared: separate application ID; no study-app data access')
-          PROBE
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if ! git diff --cached --quiet; then
+            git commit -m "Unpack project.zip and apply InkKey v2.2 fixes [skip ci]"
+            git push || true
+          fi
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -325,6 +318,5 @@ jobs:
       - name: Upload APK to Download
         uses: actions/upload-artifact@v4
         with:
-          name: InkKey-Button-Probe-1
+          name: InkKey-v2.2-debug-apk
           path: app/build/outputs/apk/debug/*.apk
-
