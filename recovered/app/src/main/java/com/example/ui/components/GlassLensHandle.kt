@@ -22,7 +22,6 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -43,8 +42,8 @@ import kotlin.math.abs
 
 /**
  * Theme-independent collapsed edge handle. It redraws the page under the handle
- * at a slight magnification so it behaves visually like a clear water droplet
- * instead of a tinted Material surface. No theme-derived fill is used.
+ * at a slight magnification so it behaves visually like a clear water droplet.
+ * The optical rim and chevron use exactly the same styling on every paper theme.
  */
 @Composable
 fun GlassLensHandle(
@@ -67,8 +66,9 @@ fun GlassLensHandle(
     } else {
         RoundedCornerShape(topEnd = 24.dp, bottomEnd = 24.dp, topStart = 5.dp, bottomStart = 5.dp)
     }
-    val darkPaper = paperStyle == PaperStyle.AMOLED_BLACK ||
-        paperStyle == PaperStyle.DARK_MODE || paperStyle == PaperStyle.BLACKBOARD
+    val rimColor = Color(0xFF7C8AA5).copy(alpha = 0.52f)
+    val causticColor = Color(0xFF94A3B8).copy(alpha = 0.34f)
+    val chevronColor = Color(0xFF74839B).copy(alpha = 0.88f)
 
     Box(
         modifier = modifier
@@ -91,11 +91,7 @@ fun GlassLensHandle(
                 }
             }
             .clickable(onClick = onOpen)
-            .border(
-                width = 1.dp,
-                color = if (darkPaper) Color.White.copy(alpha = 0.34f) else Color.White.copy(alpha = 0.62f),
-                shape = glassShape
-            )
+            .border(width = 1.dp, color = rimColor, shape = glassShape)
             .testTag("vertical_toolbar_collapsed_handle"),
         contentAlignment = Alignment.Center
     ) {
@@ -111,18 +107,13 @@ fun GlassLensHandle(
                 magnification = 1.42f
             )
 
-            // Optical edge only: no translucent theme fill. These highlights mimic
-            // the bright rim/caustic of a clear droplet and remain identical in AMOLED.
-            drawRoundRect(
-                color = Color.White.copy(alpha = if (darkPaper) 0.22f else 0.34f),
-                cornerRadius = CornerRadius(size.width / 2f, size.width / 2f),
-                style = Stroke(width = 1.2f)
-            )
+            // One small fixed caustic line only. No dark/light-theme branch and no
+            // second outline, so AMOLED gets the same glass treatment as ruled paper.
             drawLine(
-                color = Color.White.copy(alpha = if (darkPaper) 0.26f else 0.44f),
+                color = causticColor,
                 start = Offset(size.width * 0.28f, size.height * 0.10f),
                 end = Offset(size.width * 0.28f, size.height * 0.34f),
-                strokeWidth = 1.35f,
+                strokeWidth = 1.15f,
                 cap = StrokeCap.Round
             )
         }
@@ -130,7 +121,7 @@ fun GlassLensHandle(
         Icon(
             imageVector = if (dockOnRight) Icons.Default.ChevronLeft else Icons.Default.ChevronRight,
             contentDescription = "Open Drawing Toolbar",
-            tint = if (darkPaper) Color.White.copy(alpha = 0.64f) else Color(0xFF52627A).copy(alpha = 0.58f),
+            tint = chevronColor,
             modifier = Modifier.testTag("open_vertical_toolbar_button")
         )
     }
