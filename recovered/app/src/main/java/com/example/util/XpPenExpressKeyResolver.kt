@@ -3,9 +3,9 @@ package com.example.util
 import android.view.KeyEvent
 
 /**
- * Resolver for the known XP-Pen Deco Mini7 V2 express-key shortcuts recovered
- * during InkKey debugging. Keeping the mapping in one place prevents the IME
- * and the main Activity from drifting apart again.
+ * Exact XP-Pen Deco Mini7 V2 express-key chords recovered in the earlier
+ * InkKey debugging session. Only K1..K6 were actually captured; K7/K8 are
+ * intentionally NOT guessed here.
  */
 object XpPenExpressKeyResolver {
     fun isXpPen(event: KeyEvent?): Boolean {
@@ -17,7 +17,16 @@ object XpPenExpressKeyResolver {
             dev.vendorId == 0x28BD
     }
 
-    /** Pure shortcut resolver so the recovered K1-K8 layout is unit-testable. */
+    /**
+     * Recovered physical layout:
+     * K1 = B
+     * K2 = E
+     * K3 = Left Alt
+     * K4 = Space
+     * K5 = Ctrl+S
+     * K6 = Ctrl+Z
+     * K7/K8 = not captured in the verified debugging record.
+     */
     fun resolveKnownShortcut(
         keyCode: Int,
         ctrl: Boolean,
@@ -30,8 +39,6 @@ object XpPenExpressKeyResolver {
         !ctrl && !alt && !shift && keyCode == KeyEvent.KEYCODE_SPACE -> 4
         ctrl && !alt && keyCode == KeyEvent.KEYCODE_S -> 5
         ctrl && !alt && keyCode == KeyEvent.KEYCODE_Z -> 6
-        ctrl && keyCode == KeyEvent.KEYCODE_NUMPAD_ADD -> 7
-        ctrl && keyCode == KeyEvent.KEYCODE_NUMPAD_SUBTRACT -> 8
         else -> null
     }
 
@@ -43,5 +50,26 @@ object XpPenExpressKeyResolver {
             alt = event.isAltPressed,
             shift = event.isShiftPressed
         )
+    }
+
+    /** Modifier prefix packets used by composite express keys such as Ctrl+S/Z. */
+    fun isCompositePrefix(event: KeyEvent): Boolean = isXpPen(event) && when (event.keyCode) {
+        KeyEvent.KEYCODE_CTRL_LEFT,
+        KeyEvent.KEYCODE_CTRL_RIGHT,
+        KeyEvent.KEYCODE_SHIFT_LEFT,
+        KeyEvent.KEYCODE_SHIFT_RIGHT,
+        KeyEvent.KEYCODE_ALT_RIGHT -> true
+        // Left Alt is K3 itself, so never treat it as a disposable prefix.
+        else -> false
+    }
+
+    fun chordLabel(index: Int): String = when (index) {
+        1 -> "B"
+        2 -> "E"
+        3 -> "Left Alt"
+        4 -> "Space"
+        5 -> "Ctrl+S"
+        6 -> "Ctrl+Z"
+        else -> "Learned"
     }
 }
