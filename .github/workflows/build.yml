@@ -1,4 +1,4 @@
-name: InkKey Recovered Trial 9
+name: InkKey Recovered Trial 10
 on:
   push:
     branches: ["upper-barrel-probe-v18"]
@@ -31,16 +31,18 @@ jobs:
         run: python3 ../.github/workflows/trial8_ui_patch.py
       - name: Apply Trial 9 input and transient UI fixes
         run: python3 ../.github/workflows/trial9_patch.py
+      - name: Apply Trial 10 strict mapping and glass lens
+        run: python3 ../.github/workflows/trial10_patch.py
       - name: Test recovery and build APK
         run: gradle testDebugUnitTest --tests com.example.ContactRestartDetectorTest --tests com.example.Trial7HoverDetectorTest --tests com.example.BarrelToolControllerTest --tests com.example.RecoveredInputTest --tests com.example.Trial9InputUiLogicTest assembleDebug --no-daemon
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: InkKey-Recovered-Trial-9
+          name: InkKey-Recovered-Trial-10
           path: recovered/app/build/outputs/apk/debug/*.apk
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: InkKey-Trial-9-Test-Reports
+          name: InkKey-Trial-10-Test-Reports
           path: recovered/app/build/test-results/testDebugUnitTest/
