@@ -3,9 +3,8 @@ package com.example.util
 import android.view.KeyEvent
 
 /**
- * Exact XP-Pen Deco Mini7 V2 express-key chords recovered in the earlier
- * InkKey debugging session. Only K1..K6 were actually captured; K7/K8 are
- * intentionally NOT guessed here.
+ * Exact XP-Pen Deco Mini7 V2 express-key identity recovered from hardware
+ * captures in the InkKey debugging sessions.
  */
 object XpPenExpressKeyResolver {
     fun isXpPen(event: KeyEvent?): Boolean {
@@ -25,7 +24,8 @@ object XpPenExpressKeyResolver {
      * K4 = Space
      * K5 = Ctrl+S
      * K6 = Ctrl+Z
-     * K7/K8 = not captured in the verified debugging record.
+     * K7 = scan code 78 / KEYCODE_NUMPAD_ADD
+     * K8 = scan code 74 / KEYCODE_NUMPAD_SUBTRACT
      */
     fun resolveKnownShortcut(
         keyCode: Int,
@@ -42,9 +42,16 @@ object XpPenExpressKeyResolver {
         else -> null
     }
 
+    /** Hardware scan codes captured directly from the Deco Mini7 V2 monitor. */
+    fun resolveCapturedScanCode(scanCode: Int): Int? = when (scanCode) {
+        78 -> 7
+        74 -> 8
+        else -> null
+    }
+
     fun resolve(event: KeyEvent): Int? {
         if (!isXpPen(event)) return null
-        return resolveKnownShortcut(
+        return resolveCapturedScanCode(event.scanCode) ?: resolveKnownShortcut(
             keyCode = event.keyCode,
             ctrl = event.isCtrlPressed,
             alt = event.isAltPressed,
@@ -70,6 +77,8 @@ object XpPenExpressKeyResolver {
         4 -> "Space"
         5 -> "Ctrl+S"
         6 -> "Ctrl+Z"
+        7 -> "scan 78"
+        8 -> "scan 74"
         else -> "Learned"
     }
 }
