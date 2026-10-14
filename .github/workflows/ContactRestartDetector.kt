@@ -17,10 +17,12 @@ class ContactRestartDetector {
             val previous = pendingHoverExit
             pendingHoverExit = null
             if (previous != null && previous.deviceId == sample.deviceId &&
-                sample.time - previous.time in 35L..55L &&
-                previous.pressure == 0f && sample.pressure == 0f &&
-                kotlin.math.hypot(sample.x - previous.x, sample.y - previous.y) <= 12f) {
-                return Edge.PRESS_CANDIDATE
+                previous.pressure == 0f && sample.pressure == 0f) {
+                val gap = sample.time - previous.time
+                val distance = kotlin.math.hypot(sample.x - previous.x, sample.y - previous.y)
+                if (gap in 42L..50L && distance <= 18f) return Edge.PRESS_CANDIDATE
+                // Recorded release restarts are shorter, including while the pen is moving.
+                if (gap in 30L..40L && distance <= 160f) return Edge.RELEASE_CANDIDATE
             }
         }
         return Edge.NONE

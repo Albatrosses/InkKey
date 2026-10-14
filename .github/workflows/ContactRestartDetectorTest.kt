@@ -347,4 +347,24 @@ class ContactRestartDetectorTest {
         assertEquals(0, candidates)
     }
 
+    @Test fun recordedMovingHoverPressesAndReleasesAreSeparated() {
+        listOf(12.2f, 13.63f).forEach { travel ->
+            val detector = ContactRestartDetector()
+            detector.observeHover(ContactRestartDetector.Sample(10, 100L, 0f, 0f, 0f, 12), true)
+            assertEquals(ContactRestartDetector.Edge.PRESS_CANDIDATE, detector.observeHover(ContactRestartDetector.Sample(9, 146L, travel, 0f, 0f, 12), true))
+        }
+        val detector = ContactRestartDetector()
+        detector.observeHover(ContactRestartDetector.Sample(10, 200L, 0f, 0f, 0f, 12), true)
+        assertEquals(ContactRestartDetector.Edge.RELEASE_CANDIDATE, detector.observeHover(ContactRestartDetector.Sample(9, 238L, 56.61f, 0f, 0f, 12), true))
+    }
+    @Test fun aTipLiftDoesNotReleaseTheHeldToolState() {
+        val held = com.example.util.HeldBarrelState()
+        held.update(ContactRestartDetector.Edge.PRESS_CANDIDATE)
+        val detector = ContactRestartDetector()
+        held.update(detector.observe(ContactRestartDetector.Sample(1, 100L, 0f, 0f, 0.009949338f, 12), true))
+        assertEquals(true, held.pressed)
+        held.update(ContactRestartDetector.Edge.RELEASE_CANDIDATE)
+        assertEquals(false, held.pressed)
+    }
+
 }
