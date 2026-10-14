@@ -232,16 +232,12 @@ object ShapeRecognizer {
         // 5. ARROW CHECK
         // Check if stroke forms a straight shaft followed by an arrowhead barb
         if (points.size >= 8) {
-            // Find the point furthest from start - likely the tip of the arrow
-            var maxDistFromStart = 0f
-            var tipIdx = 0
-            for (i in points.indices) {
-                val d = hypot(points[i].x - start.x, points[i].y - start.y)
-                if (d > maxDistFromStart) {
-                    maxDistFromStart = d
-                    tipIdx = i
-                }
-            }
+            // Use the first outward peak near the furthest point. An arrow often
+            // revisits its tip while drawing the second barb; that revisit is not the shaft.
+            val distances = points.map { hypot(it.x - start.x, it.y - start.y) }
+            val maxDistFromStart = distances.maxOrNull() ?: 0f
+            var tipIdx = distances.indexOfFirst { it >= maxDistFromStart * 0.98f }.coerceAtLeast(0)
+            while (tipIdx < distances.lastIndex && distances[tipIdx + 1] > distances[tipIdx]) tipIdx++
 
             // Tip should be past the middle of the stroke (shaft first, then arrowhead)
             if (tipIdx >= (points.size * 0.50f).toInt() && tipIdx < points.size - 2 && maxDistFromStart >= 30f) {
