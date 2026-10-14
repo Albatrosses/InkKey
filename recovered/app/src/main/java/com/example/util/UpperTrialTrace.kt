@@ -9,6 +9,7 @@ import java.util.ArrayDeque
 object UpperTrialTrace {
     private val lines = ArrayDeque<String>()
     private var lastHover = 0L
+
     fun motion(event: android.view.MotionEvent, route: String) {
         val dev = event.device ?: return
         if (dev.vendorId != 0x28BD || dev.productId != 0x0948 || event.pointerCount == 0) return
@@ -18,13 +19,15 @@ object UpperTrialTrace {
         }
         record("route=$route time=${event.eventTime} action=${android.view.MotionEvent.actionToString(event.actionMasked)} pressure=${event.pressure} tool=${event.getToolType(0)} buttons=${event.buttonState} actionButton=${event.actionButton} x=${event.x} y=${event.y} distance=${event.getAxisValue(android.view.MotionEvent.AXIS_DISTANCE)} source=${event.source}")
     }
+
     fun record(line: String) {
-        if (lines.size >= 6000) lines.removeFirst()
+        if (lines.size >= 12000) lines.removeFirst()
         lines.addLast(line)
     }
+
     fun share(context: Context) {
         val file = File(context.cacheDir, "inkkey-upper-trial.txt")
-        file.writeText("InkKey Recovered Trial 6; inferred contact-restart candidates, not hardware button bits\n" + lines.joinToString("\n"))
+        file.writeText("InkKey Recovered Trial 7; root IME routing + moving-hover upper inference\n" + lines.joinToString("\n"))
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"

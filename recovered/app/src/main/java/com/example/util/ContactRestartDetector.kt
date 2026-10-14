@@ -9,7 +9,11 @@ class ContactRestartDetector {
 
     fun reset() { pendingUp = null; pendingHoverExit = null }
 
-    /** Trial signature: recorded pre-held mode switches interrupt hover for 44–46 ms. */
+    /**
+     * XP-Pen Deco Mini 7 V2 upper-barrel presses repeatedly restart hover after ~44–47 ms.
+     * Trial 6 recorded genuine-looking 44–47 ms restarts with normal pen motion up to ~91 px,
+     * so timing is the primary signature and the movement cap is only a dropout guard.
+     */
     fun observeHover(sample: Sample, eligible: Boolean): Edge {
         if (!eligible) { pendingHoverExit = null; return Edge.NONE }
         if (sample.action == 10) pendingHoverExit = sample // ACTION_HOVER_EXIT
@@ -20,7 +24,7 @@ class ContactRestartDetector {
                 previous.pressure == 0f && sample.pressure == 0f) {
                 val gap = sample.time - previous.time
                 val distance = kotlin.math.hypot(sample.x - previous.x, sample.y - previous.y)
-                if (gap in 42L..50L && distance <= 24f) return Edge.PRESS_CANDIDATE
+                if (gap in 42L..50L && distance <= 120f) return Edge.PRESS_CANDIDATE
                 // Recorded release restarts are shorter, including while the pen is moving.
                 if (gap in 30L..40L && distance <= 160f) return Edge.RELEASE_CANDIDATE
             }
