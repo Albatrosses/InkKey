@@ -229,7 +229,7 @@ class ImeDocumentRepository private constructor(private val context: Context) {
 
     fun clearTransientState() {
         clearTransientBarrelTool()
-        _selectedSymbolId.value = null
+        // Selection is document state: hiding the keyboard or opening its editor must not discard it.
     }
 
     // Tool setters
@@ -529,8 +529,12 @@ class ImeDocumentRepository private constructor(private val context: Context) {
     }
 
     fun updateSelectedSymbolText(text: String) {
-        if (text.isBlank()) return
         val id = _selectedSymbolId.value ?: return
+        updateSymbolText(id, text)
+    }
+
+    fun updateSymbolText(id: String, text: String) {
+        if (text.isBlank()) return
         val doc = _document.value
         val index = _currentPageIndex.value
         if (doc.pages.getOrNull(index)?.textAnnotations?.none { it.id == id && it.text != text } != false) return

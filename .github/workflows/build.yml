@@ -1,4 +1,4 @@
-name: InkKey Recovered Trial 13
+name: InkKey Recovered Trial 14
 on:
   push:
     branches: ["upper-barrel-probe-v18"]
@@ -24,15 +24,15 @@ jobs:
           cp .env.example .env
           keytool -genkeypair -keystore debug.keystore -storepass android -alias androiddebugkey -keypass android -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
       - name: Test recovery and build APK
-        run: gradle testDebugUnitTest --tests com.example.ContactRestartDetectorTest --tests com.example.Trial7HoverDetectorTest --tests com.example.BarrelToolControllerTest --tests com.example.RecoveredInputTest --tests com.example.Trial9InputUiLogicTest --tests com.example.ShapeRecognizerTest --tests com.example.ShapeRecognitionRegressionTest --tests com.example.ExpressKeyMatchingRegressionTest --tests com.example.Trial13InputSymbolTest --tests com.example.SymbolHitTestTest assembleDebug --no-daemon
+        run: gradle testDebugUnitTest --tests com.example.ContactRestartDetectorTest --tests com.example.Trial7HoverDetectorTest --tests com.example.BarrelToolControllerTest --tests com.example.RecoveredInputTest --tests com.example.Trial9InputUiLogicTest --tests com.example.ShapeRecognizerTest --tests com.example.ShapeRecognitionRegressionTest --tests com.example.ExpressKeyMatchingRegressionTest --tests com.example.Trial13InputSymbolTest --tests com.example.SymbolHitTestTest --tests com.example.Trial14StateRegressionTest --tests com.example.SymbolControlTouchTest assembleDebug --no-daemon
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: InkKey-Recovered-Trial-13
+          name: InkKey-Recovered-Trial-14
           path: recovered/app/build/outputs/apk/debug/*.apk
       - name: Upload test reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: InkKey-Trial-13-Test-Reports
+          name: InkKey-Trial-14-Test-Reports
           path: recovered/app/build/test-results/testDebugUnitTest/

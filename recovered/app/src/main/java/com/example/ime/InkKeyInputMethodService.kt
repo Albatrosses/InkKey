@@ -111,7 +111,7 @@ class InkKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewModel
         composeView.setViewTreeViewModelStoreOwner(this)
         composeView.setViewTreeSavedStateRegistryOwner(this)
         composeView.setParentCompositionContext(recomposer)
-        composeView.setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindowOrReleasedFromPool)
+        composeView.setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
 
         composeView.setContent {
             MyApplicationTheme {
@@ -155,7 +155,7 @@ class InkKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewModel
         super.onFinishInputView(finishingInput)
         // Note: Android reuses the InputView returned by onCreateInputView across show/hide cycles.
         // Disposing composition here breaks subsequent keyboard sessions.
-        // ViewCompositionStrategy.DisposeOnDetachedFromWindowOrReleasedFromPool and onDestroy() handle proper disposal.
+        // ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed and onDestroy() handle proper disposal.
         try {
             val repo = com.example.ime.data.ImeDocumentRepository.getInstance(this)
             repo.clearTransientState()

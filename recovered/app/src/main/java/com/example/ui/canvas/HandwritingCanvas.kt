@@ -8,6 +8,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntSize
+import com.example.ui.components.symbolControlGuard
 import com.example.ui.components.SymbolTextEditDialog
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -573,7 +574,7 @@ fun HandwritingCanvas(
             val maxActionX = (canvasSize.width - with(density) { 300.dp.toPx() }).roundToInt().coerceAtLeast(10)
 
             Surface(
-                modifier = Modifier
+                modifier = Modifier.symbolControlGuard()
                     .offset { IntOffset(screenX.coerceIn(10, maxActionX), screenY) }
                     .border(1.dp, MaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(12.dp)),
                 shape = RoundedCornerShape(12.dp),

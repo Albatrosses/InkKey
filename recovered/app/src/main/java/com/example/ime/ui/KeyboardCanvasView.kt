@@ -124,6 +124,7 @@ import com.example.model.TabletAction
 import com.example.model.TextAnnotation
 import com.example.model.ToolType
 import com.example.model.ToolbarToolItem
+import com.example.ui.components.symbolControlGuard
 import com.example.util.ShapeRecognizer
 import java.io.File
 import java.io.FileOutputStream
@@ -252,13 +253,11 @@ fun KeyboardCanvasView(
     }
 
     // Selected Symbol drag tracking
-    var showSymbolTextEditor by remember { mutableStateOf(false) }
-    if (showSymbolTextEditor) {
-        currentPage.textAnnotations.find { it.id == selectedSymbolId }?.let { symbol ->
-            com.example.ui.components.SymbolTextEditDialog(symbol.text,
-                onSave = { repository.updateSelectedSymbolText(it); showSymbolTextEditor = false },
-                onDismiss = { showSymbolTextEditor = false })
-        }
+    var editingSymbol by remember { mutableStateOf<TextAnnotation?>(null) }
+    editingSymbol?.let { symbol ->
+        com.example.ui.components.SymbolTextEditDialog(symbol.text,
+            onSave = { repository.updateSymbolText(symbol.id, it); repository.selectSymbol(symbol.id); editingSymbol = null },
+            onDismiss = { editingSymbol = null })
     }
     var isDraggingSymbol by remember { mutableStateOf(false) }
     var lastSymbolTouchPoint by remember { mutableStateOf<Offset?>(null) }
@@ -1174,7 +1173,7 @@ fun KeyboardCanvasView(
             AnimatedVisibility(visible = currentTool == ToolType.SYMBOL_EDIT && selectedSymbolId != null) {
                 val activeSym = currentPage.textAnnotations.find { it.id == selectedSymbolId }
                 Row(
-                    modifier = Modifier
+                    modifier = Modifier.symbolControlGuard()
                         .fillMaxWidth()
                         .background(Color(0xFFFEF3C7))
                         .horizontalScroll(rememberScrollState())
@@ -1189,7 +1188,7 @@ fun KeyboardCanvasView(
                         color = Color(0xFF92400E)
                     )
 
-                    TextButton(onClick = { showSymbolTextEditor = true }) { Text("Edit") }
+                    TextButton(onClick = { editingSymbol = activeSym }) { Text("Edit") }
 
                     // Font Size Minus
                     IconButton(

@@ -89,7 +89,8 @@ class BarrelInputRouter(config: () -> TabletConfig, execute: (TabletAction) -> U
 
         // Real Android barrel bits always win over inference and clear only inferred state.
         if (hasPhysical) {
-            clearInferred()
+            if (StylusHardwareDetector.classifyMotionEvent(event) == StylusHardwareDetector.BarrelTarget.UPPER_BARREL) clearInferred()
+            else detector.reset() // A lower press temporarily overrides, but does not release, upper.
             return
         }
 
@@ -109,7 +110,7 @@ class BarrelInputRouter(config: () -> TabletConfig, execute: (TabletAction) -> U
             return hasPhysical
         }
 
-        if (hasPhysical) clearInferred()
+        if (hasPhysical && StylusHardwareDetector.classifyMotionEvent(event) == StylusHardwareDetector.BarrelTarget.UPPER_BARREL) clearInferred()
 
         val isEligible = eligible(event)
         edge(detector.observeHover(sample(event), isEligible), event.eventTime)
@@ -126,6 +127,7 @@ class BarrelInputRouter(config: () -> TabletConfig, execute: (TabletAction) -> U
     }
 
     private fun physical(event: MotionEvent): Boolean {
+        if (event.pointerCount > 0 && event.getToolType(0) == MotionEvent.TOOL_TYPE_FINGER) return false
         val target = StylusHardwareDetector.classifyMotionEvent(event)
         val down = event.actionMasked !in intArrayOf(
             MotionEvent.ACTION_BUTTON_RELEASE,

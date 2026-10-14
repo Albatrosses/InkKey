@@ -1,7 +1,7 @@
 package com.example.util
 
 /** Experimental, device-specific inference from paired pressure-bearing contact restarts. */
-class ContactRestartDetector {
+class ContactRestartDetector(private val allowHoverTrajectory: Boolean = false) {
     data class Sample(val action: Int, val time: Long, val x: Float, val y: Float, val pressure: Float, val deviceId: Int)
     enum class Edge { NONE, PRESS_CANDIDATE, RELEASE_CANDIDATE }
     private var pendingUp: Sample? = null
@@ -54,7 +54,9 @@ class ContactRestartDetector {
                 val gap = sample.time - previous.time
                 val distance = kotlin.math.hypot(sample.x - previous.x, sample.y - previous.y)
                 // During a restart the pen can keep moving along the stroke.
-                val movementAllowance = maxOf(12f + gap * 4f, observedHoverTravel + 24f).coerceAtMost(160f)
+                val movementAllowance = if (allowHoverTrajectory) {
+                    maxOf(12f + gap * 4f, observedHoverTravel + 24f).coerceAtMost(160f)
+                } else (12f + gap * 4f).coerceAtMost(160f)
                 if (gap !in 1L..100L || distance > movementAllowance || sample.pressure <= 0.02f) return Edge.NONE
                 val ratio = sample.pressure / previous.pressure
                 if (ratio >= 1.7f) return Edge.PRESS_CANDIDATE

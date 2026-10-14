@@ -56,7 +56,7 @@ class Trial13InputSymbolTest {
         assertFalse(symbol.hitResizeHandle(corner.x + 80f,corner.y,1f))
     }
     @Test fun fastRecordedRestartUsesItsIntermediateHoverTrajectory() {
-        val detector = ContactRestartDetector()
+        val detector = ContactRestartDetector(allowHoverTrajectory = true)
         detector.observe(ContactRestartDetector.Sample(1,118901191L,322.83325f,544.2627f,0.06116096f,12),true)
         detector.observeHover(ContactRestartDetector.Sample(9,118901191L,319.04297f,555.3955f,0f,12),true)
         detector.observeHover(ContactRestartDetector.Sample(10,118901203L,292.54395f,634.79004f,0f,12),true)
