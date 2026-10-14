@@ -8,13 +8,23 @@ import java.util.ArrayDeque
 
 object UpperTrialTrace {
     private val lines = ArrayDeque<String>()
+    private var lastHover = 0L
+    fun motion(event: android.view.MotionEvent, route: String) {
+        val dev = event.device ?: return
+        if (dev.vendorId != 0x28BD || dev.productId != 0x0948 || event.pointerCount == 0) return
+        if (event.actionMasked == android.view.MotionEvent.ACTION_HOVER_MOVE && event.buttonState == 0) {
+            if (event.eventTime - lastHover < 100L) return
+            lastHover = event.eventTime
+        }
+        record("route=$route time=${event.eventTime} action=${android.view.MotionEvent.actionToString(event.actionMasked)} pressure=${event.pressure} tool=${event.getToolType(0)} buttons=${event.buttonState} actionButton=${event.actionButton} x=${event.x} y=${event.y} distance=${event.getAxisValue(android.view.MotionEvent.AXIS_DISTANCE)} source=${event.source}")
+    }
     fun record(line: String) {
         if (lines.size >= 6000) lines.removeFirst()
         lines.addLast(line)
     }
     fun share(context: Context) {
         val file = File(context.cacheDir, "inkkey-upper-trial.txt")
-        file.writeText("InkKey Upper Trial 2; inferred contact-restart candidates, not hardware button bits\n" + lines.joinToString("\n"))
+        file.writeText("InkKey Upper Trial 3; inferred contact-restart candidates, not hardware button bits\n" + lines.joinToString("\n"))
         val uri = FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", file)
         context.startActivity(Intent.createChooser(Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"

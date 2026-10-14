@@ -8,10 +8,10 @@ def replace_once(code, old, new):
 
 gradle = root / 'app/build.gradle.kts'
 code = gradle.read_text()
-code = replace_once(code, 'applicationId = "com.aistudio.inkkey.vzqwx"', 'applicationId = "com.aistudio.inkkey.uppertrial2"')
-gradle.write_text(re.sub(r'versionName = "[^"]+"', 'versionName = "1.8-upper-trial-2"', code, count=1))
+code = replace_once(code, 'applicationId = "com.aistudio.inkkey.vzqwx"', 'applicationId = "com.aistudio.inkkey.uppertrial3"')
+gradle.write_text(re.sub(r'versionName = "[^"]+"', 'versionName = "1.8-upper-trial-3"', code, count=1))
 manifest = root / 'app/src/main/AndroidManifest.xml'
-code = manifest.read_text().replace('android:label="@string/app_name"', 'android:label="InkKey Upper Trial 2"')
+code = manifest.read_text().replace('android:label="@string/app_name"', 'android:label="InkKey Upper Trial 3"')
 code = re.sub(r'\s*<service\s+android:name="\.ime\.InkKeyInputMethodService"[\s\S]*?</service>', '', code, count=1)
 manifest.write_text(code)
 
@@ -60,10 +60,7 @@ handler = '''    private val upperRestartDetector = com.example.util.ContactRest
             com.example.util.UpperTrialTrace.record("INFERRED_EDGE=$edge time=${event.eventTime} held=${upperTrialHeld.pressed} selected=${_currentTool.value} override=$upperTrialToolOverride")
         }
         if (edge == com.example.util.ContactRestartDetector.Edge.PRESS_CANDIDATE && !wasHeld) {
-            _tabletFeedbackMessage.value = "Upper trial: ${_tabletConfig.value.upperBarrelAction.displayName} while held"
             if (upperTrialToolOverride == null && _tabletConfig.value.upperBarrelAction != TabletAction.NONE) executeTabletAction(_tabletConfig.value.upperBarrelAction)
-        } else if (edge == com.example.util.ContactRestartDetector.Edge.RELEASE_CANDIDATE) {
-            _tabletFeedbackMessage.value = "Upper released: ${_currentTool.value} restored"
         }
         if (event.actionMasked == MotionEvent.ACTION_UP) {
             upperTrialLiftJob?.cancel()
@@ -83,6 +80,11 @@ path = root / 'app/src/main/java/com/example/ui/canvas/HandwritingCanvas.kt'
 canvas = path.read_text()
 canvas = replace_once(canvas, 'else -> currentTool\n                }', 'else -> viewModel.upperTrialToolOverride ?: currentTool\n                }')
 path.write_text(canvas)
+
+path = root / 'app/src/main/java/com/example/MainActivity.kt'
+activity = path.read_text()
+activity = replace_once(activity, 'override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {', 'override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {\n        com.example.util.UpperTrialTrace.motion(event, "GENERIC")')
+path.write_text(activity)
 
 path = root / 'app/src/main/java/com/example/ui/settings/SettingsScreen.kt'
 code = path.read_text()
