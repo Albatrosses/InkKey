@@ -115,6 +115,10 @@ class MainActivity : ComponentActivity() {
         mainViewModel?.let { handleIntent(intent, it) }
     }
 
+    // Android's public Activity/Window.Callback method is required to receive tablet keys
+    // before focused children consume them. AndroidX marks its override library-only;
+    // retain Android's normal superclass dispatch for every unhandled key.
+    @android.annotation.SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.keyCode == KeyEvent.KEYCODE_BACK && mainViewModel?.tabletConfig?.value?.customKeyCodes?.values?.contains(KeyEvent.KEYCODE_BACK) != true) return super.dispatchKeyEvent(event)
         val vm = mainViewModel

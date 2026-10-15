@@ -136,3 +136,10 @@ dependencies {
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
 }
+
+// Robolectric sandboxes share Compose/Espresso static state within one JVM.
+// Isolate classes so activity/service smoke tests cannot poison later UI idling.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+  forkEvery = 1
+  maxParallelForks = 1
+}
