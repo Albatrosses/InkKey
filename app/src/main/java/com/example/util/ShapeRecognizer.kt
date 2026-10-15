@@ -22,51 +22,51 @@ object ShapeRecognizer {
             kept
         }
         if (points.size < 2) return stroke
-    if (stroke.shapeType != ShapeType.NONE) {
-        val s = points.first()
-        val e = points.last()
-        val minX = points.minOf { it.x }
-        val maxX = points.maxOf { it.x }
-        val minY = points.minOf { it.y }
-        val maxY = points.maxOf { it.y }
-        val cx = (minX + maxX) / 2f
-        val cy = (minY + maxY) / 2f
-        when (stroke.shapeType) {
-            ShapeType.LINE -> return stroke.copy(points = listOf(DrawingPoint(s.x, s.y), DrawingPoint(e.x, e.y)), isShape = true, shapeType = ShapeType.LINE)
-            ShapeType.ARROW -> {
-                val length = hypot(e.x - s.x, e.y - s.y)
-                if (length < 2f) return stroke
-                val angle = atan2(e.y - s.y, e.x - s.x)
-                val head = min(32f, length * 0.28f)
-                return stroke.copy(points = listOf(s, e,
-                    DrawingPoint(e.x - head * cos(angle - 0.48f), e.y - head * sin(angle - 0.48f)), e,
-                    DrawingPoint(e.x - head * cos(angle + 0.48f), e.y - head * sin(angle + 0.48f))), isShape = true, shapeType = ShapeType.ARROW)
-            }
-            ShapeType.RECTANGLE -> return stroke.copy(points = listOf(DrawingPoint(minX, minY), DrawingPoint(maxX, minY), DrawingPoint(maxX, maxY), DrawingPoint(minX, maxY), DrawingPoint(minX, minY)), isShape = true, shapeType = ShapeType.RECTANGLE)
-            ShapeType.TRIANGLE -> return stroke.copy(points = listOf(DrawingPoint(cx, minY), DrawingPoint(maxX, maxY), DrawingPoint(minX, maxY), DrawingPoint(cx, minY)), isShape = true, shapeType = ShapeType.TRIANGLE)
-            ShapeType.CIRCLE -> {
-                val r = max(maxX - minX, maxY - minY) / 2f
-                val cPts = (0..48).map { idx ->
-                    val ang = 2f * PI.toFloat() * idx / 48
-                    DrawingPoint(cx + r * cos(ang), cy + r * sin(ang), 1f)
+        if (stroke.shapeType != ShapeType.NONE) {
+            val s = points.first()
+            val e = points.last()
+            val minX = points.minOf { it.x }
+            val maxX = points.maxOf { it.x }
+            val minY = points.minOf { it.y }
+            val maxY = points.maxOf { it.y }
+            val cx = (minX + maxX) / 2f
+            val cy = (minY + maxY) / 2f
+            when (stroke.shapeType) {
+                ShapeType.LINE -> return stroke.copy(points = listOf(DrawingPoint(s.x, s.y), DrawingPoint(e.x, e.y)), isShape = true, shapeType = ShapeType.LINE)
+                ShapeType.ARROW -> {
+                    val length = hypot(e.x - s.x, e.y - s.y)
+                    if (length < 2f) return stroke
+                    val angle = atan2(e.y - s.y, e.x - s.x)
+                    val head = min(32f, length * 0.28f)
+                    return stroke.copy(points = listOf(s, e,
+                        DrawingPoint(e.x - head * cos(angle - 0.48f), e.y - head * sin(angle - 0.48f)), e,
+                        DrawingPoint(e.x - head * cos(angle + 0.48f), e.y - head * sin(angle + 0.48f))), isShape = true, shapeType = ShapeType.ARROW)
                 }
-                return stroke.copy(points = cPts, isShape = true, shapeType = ShapeType.CIRCLE)
-            }
-            ShapeType.ELLIPSE -> {
-                val a = (maxX - minX) / 2f
-                val b = (maxY - minY) / 2f
-                val ePts = (0..48).map { idx ->
-                    val ang = 2f * PI.toFloat() * idx / 48
-                    DrawingPoint(cx + a * cos(ang), cy + b * sin(ang), 1f)
+                ShapeType.RECTANGLE -> return stroke.copy(points = listOf(DrawingPoint(minX, minY), DrawingPoint(maxX, minY), DrawingPoint(maxX, maxY), DrawingPoint(minX, maxY), DrawingPoint(minX, minY)), isShape = true, shapeType = ShapeType.RECTANGLE)
+                ShapeType.TRIANGLE -> return stroke.copy(points = listOf(DrawingPoint(cx, minY), DrawingPoint(maxX, maxY), DrawingPoint(minX, maxY), DrawingPoint(cx, minY)), isShape = true, shapeType = ShapeType.TRIANGLE)
+                ShapeType.CIRCLE -> {
+                    val r = max(maxX - minX, maxY - minY) / 2f
+                    val cPts = (0..48).map { idx ->
+                        val ang = 2f * PI.toFloat() * idx / 48
+                        DrawingPoint(cx + r * cos(ang), cy + r * sin(ang), 1f)
+                    }
+                    return stroke.copy(points = cPts, isShape = true, shapeType = ShapeType.CIRCLE)
                 }
-                return stroke.copy(points = ePts, isShape = true, shapeType = ShapeType.ELLIPSE)
+                ShapeType.ELLIPSE -> {
+                    val a = (maxX - minX) / 2f
+                    val b = (maxY - minY) / 2f
+                    val ePts = (0..48).map { idx ->
+                        val ang = 2f * PI.toFloat() * idx / 48
+                        DrawingPoint(cx + a * cos(ang), cy + b * sin(ang), 1f)
+                    }
+                    return stroke.copy(points = ePts, isShape = true, shapeType = ShapeType.ELLIPSE)
+                }
+                else -> {}
             }
-            else -> {}
         }
-    }
-    if (points.size < 3) return stroke
-    points = resampleByDistance(points)
-    if (points.size < 6) return stroke
+        if (points.size < 3) return stroke
+        points = resampleByDistance(points)
+        if (points.size < 6) return stroke
 
         val start = points.first()
         val end = points.last()

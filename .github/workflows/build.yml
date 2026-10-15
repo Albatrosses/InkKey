@@ -37,6 +37,25 @@ jobs:
           KEY_PASSWORD: ${{ secrets.INKKEY_KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.INKKEY_KEY_ALIAS }}
         run: gradle testDebugUnitTest lintRelease assembleRelease --no-daemon
+      - name: Summarize verification results
+        if: always()
+        run: |
+          python - <<'PYCODE'
+          import pathlib, xml.etree.ElementTree as ET
+          for path in pathlib.Path('app/build/reports').glob('lint-results-release.xml'):
+              for issue in ET.parse(path).getroot().findall('issue'):
+                  if issue.get('severity') in ('Error', 'Fatal'):
+                      print('LINT ERROR:', issue.attrib)
+                      for location in issue.findall('location'): print(location.attrib)
+          totals = [0, 0, 0]
+          for path in pathlib.Path('app/build/test-results/testDebugUnitTest').glob('TEST-*.xml'):
+              root = ET.parse(path).getroot()
+              for i, key in enumerate(('tests', 'failures', 'errors')): totals[i] += int(root.get(key, 0))
+              for case in root.findall('testcase'):
+                  for failure in case.findall('failure') + case.findall('error'):
+                      print('TEST FAILURE:', case.get('classname'), case.get('name'), (failure.text or '')[:4500])
+          print('VERIFICATION TOTALS: tests=%d failures=%d errors=%d' % tuple(totals))
+          PYCODE
       - name: Name installable APK
         run: cp app/build/outputs/apk/release/app-release.apk InkKey-3.0.apk
       - name: Upload APK
