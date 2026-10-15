@@ -1,22 +1,43 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://ai.google.dev/static/site-assets/images/share-ais-513315318.png" />
-</div>
+# InkKey
 
-# Run and deploy your AI Studio app
+InkKey is an Android handwriting workspace and handwriting keyboard for working through Physics, Chemistry, Biology, and mathematics. Write with a pen tablet, organize pages, insert editable scientific symbols, recognize drawn shapes, and share your work as images or PDFs with ChatGPT or another app.
 
-This contains everything you need to run your app locally.
+## Features
 
-View your app in AI Studio: https://ai.studio/apps/47004eb7-f2ac-4e1f-9356-c5f01a6e70b6
+- Pressure-sensitive writing, configurable pen and eraser tools, undo/redo, page management, and paper styles.
+- Standalone canvas and Android input-method keyboard, with tablet settings and shared express-key mappings.
+- Editable, movable, resizable, and rotatable text and scientific symbols.
+- Shape recognition for lines, arrows, circles, ellipses, triangles, and rectangles.
+- A narrow, borderless droplet handle for opening the floating toolbar.
+- Temporary barrel-button tools that return to the selected tool on release.
+- Image and PDF export and Android sharing.
 
-## Run Locally
+## Install
 
-**Prerequisites:**  [Android Studio](https://developer.android.com/studio)
+Open the latest successful **InkKey** run in [GitHub Actions](https://github.com/Albatrosses/InkKey/actions), download **InkKey-3.0**, extract the ZIP, and install `InkKey-3.0.apk`. Enable and select **InkKey** in Android's keyboard settings to use the keyboard interface.
 
+The maintained app uses package `com.inkkey.android`. It installs separately from earlier experimental apps; existing notes in those apps are not automatically migrated. Export any notes you want to keep before removing older installations.
 
-1. Open Android Studio
-2. Select **Open** and choose the directory containing this project
-3. Allow Android Studio to fix any incompatibilities as it imports the project.
-4. Create a file named `.env` in the project directory and set `GEMINI_API_KEY` in that file to your Gemini API key (see `.env.example` for an example)
-5. Remove this line from the app's `build.gradle.kts` file: `signingConfig = signingConfigs.getByName("debugConfig")`
-6. Run the app on an emulator or physical device
-7. If you have already published your app in AI Studio, please [request upload key reset](https://support.google.com/googleplay/android-developer/answer/9842756#zippy=%2Crequest-an-upload-key-reset) in Google Play Console.
+## Source and builds
+
+This repository contains the complete maintained native Kotlin/Jetpack Compose source. The app lives in `app/src/main`, tests in `app/src/test`, dependency versions in `gradle/libs.versions.toml`, and the build workflow in `.github/workflows/build.yml`. No source ZIP extraction or patch scripts are needed.
+
+Use JDK 21, Gradle 9.3.1, and the Android SDK required by `app/build.gradle.kts`. Copy `.env.example` to `.env` and provide a signing keystore as described in [maintenance notes](docs/MAINTENANCE.md), then run:
+
+```sh
+gradle testDebugUnitTest lintRelease assembleRelease --no-daemon
+```
+
+CI runs the full JVM/Robolectric test suite, Android lint, and builds the signed APK. Physical tablet behavior still requires hardware testing; passing automated tests does not establish perfect upper-button accuracy.
+
+## Upper barrel button
+
+On the tested XP-Pen Deco Mini7 V2 / Android setup, the upper button does not report a dedicated Android button bit in the captured events. InkKey infers temporary upper-button state from specific hover and pressure-bearing contact restarts. Hover press matching includes the recorded 46-ms / 132.7-pixel and 52-ms restarts; ordinary tip lifts retain separate safeguards. Detection may still miss or misclassify events on some hardware. Other tablets with explicit button bits use those directly.
+
+## Development and Codex contributions
+
+Albertrosses directed the project, tested the tablet repeatedly, and provided APKs, screenshots, and event reports that exposed the upper-button restart signature.
+
+Codex assisted with recovering maintainable native source and reconstructing input behavior from the surviving APK after the earlier local source was lost. Subsequent work includes shared tablet/express-key routing, independent temporary barrel-tool state, keyboard input ownership, symbol selection and editing fixes, shape-fitting improvements, the droplet toolbar handle, log-based upper-button regression tests, and automated build verification. This is a maintained reconstruction and development effort, not a claim that it reproduces every detail of the deleted source.
+
+Old source snapshots, inline patch scripts, and duplicate workflow helper files have been removed from the current tree. Git history and the earlier development branch remain available for recovery.

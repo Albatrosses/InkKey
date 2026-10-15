@@ -110,6 +110,7 @@ class ExampleRobolectricTest {
         val controller = org.robolectric.Robolectric.buildActivity(MainActivity::class.java, intent).setup()
         val activity = controller.get()
         assertNotNull(activity)
+        controller.pause().stop().destroy()
     }
 }
 

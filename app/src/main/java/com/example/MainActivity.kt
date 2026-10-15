@@ -12,6 +12,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.Modifier
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
@@ -58,7 +59,14 @@ class MainActivity : ComponentActivity() {
                     }
                 }
 
-                Surface(modifier = Modifier.fillMaxSize()) {
+                Surface(modifier = Modifier.fillMaxSize().onPreviewKeyEvent { composeEvent ->
+                    val event = composeEvent.nativeKeyEvent
+                    val xpPen = event.device?.name?.contains("ugtablet deco mini7 v2", true) == true
+                    if (xpPen && event.keyCode == KeyEvent.KEYCODE_SPACE) {
+                        viewModel.handleHardwareKeyEvent(event.keyCode, event.scanCode, event)
+                        true
+                    } else false
+                }) {
                     when (currentScreen) {
                         ScreenState.IME_SETUP -> {
                             ImeSetupScreen(
@@ -88,7 +96,18 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+        window.decorView.post {
+            (window.decorView as? android.view.ViewGroup)?.descendantFocusability = android.view.ViewGroup.FOCUS_AFTER_DESCENDANTS
+            window.decorView.isFocusableInTouchMode = true
+            window.decorView.requestFocus()
+        }
     }
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean =
+        if (mainViewModel?.handleHardwareKeyEvent(keyCode, event.scanCode, event) == true) true else super.onKeyDown(keyCode, event)
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean =
+        if (mainViewModel?.handleHardwareKeyEvent(keyCode, event.scanCode, event) == true) true else super.onKeyUp(keyCode, event)
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
@@ -96,17 +115,21 @@ class MainActivity : ComponentActivity() {
         mainViewModel?.let { handleIntent(intent, it) }
     }
 
+    // Android's public Activity/Window.Callback method is required to receive tablet keys
+    // before focused children consume them. AndroidX marks its override library-only;
+    // retain Android's normal superclass dispatch for every unhandled key.
+    @android.annotation.SuppressLint("RestrictedApi")
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.keyCode == KeyEvent.KEYCODE_BACK && mainViewModel?.tabletConfig?.value?.customKeyCodes?.values?.contains(KeyEvent.KEYCODE_BACK) != true) return super.dispatchKeyEvent(event)
         val vm = mainViewModel
-        if (vm != null && vm.handleHardwareKeyEvent(event.keyCode, event.scanCode, event)) {
-            return true
-        }
+        val handled = vm?.handleHardwareKeyEvent(event.keyCode, event.scanCode, event) == true
+        if (handled) return true
         return super.dispatchKeyEvent(event)
     }
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
     val vm = mainViewModel
-    if (vm != null && vm.onRawTabletTouchEvent(event)) {
+    if (vm != null && vm.handleTouchMotionEvent(event)) {
         return true
     }
     return super.dispatchTouchEvent(event)
@@ -118,6 +141,19 @@ override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
             return true
         }
         return super.dispatchGenericMotionEvent(event)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        mainViewModel?.reloadTabletConfig()
+        window.decorView.post {
+            if (window.decorView.findFocus() == null) window.decorView.requestFocus()
+        }
+    }
+
+    override fun onPause() {
+        mainViewModel?.resetBarrelInput()
+        super.onPause()
     }
 
     override fun onTrimMemory(level: Int) {

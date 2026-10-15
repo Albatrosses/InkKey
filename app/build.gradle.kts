@@ -13,23 +13,23 @@ android {
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.inkkey.vzqwx"
+    applicationId = "com.inkkey.android"
 
     minSdk = 24
     targetSdk = 36
-    versionCode = 12
-    versionName = "2.2"
+    versionCode = 30
+    versionName = "3.0"
 
     testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
   }
 
   signingConfigs {
     create("release") {
-      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/my-upload-key.jks"
+      val keystorePath = System.getenv("KEYSTORE_PATH") ?: "${rootDir}/debug.keystore"
       storeFile = file(keystorePath)
-      storePassword = System.getenv("STORE_PASSWORD")
-      keyAlias = "upload"
-      keyPassword = System.getenv("KEY_PASSWORD")
+      storePassword = System.getenv("STORE_PASSWORD")?.takeIf { it.isNotBlank() } ?: "android"
+      keyAlias = System.getenv("KEY_ALIAS")?.takeIf { it.isNotBlank() } ?: "androiddebugkey"
+      keyPassword = System.getenv("KEY_PASSWORD")?.takeIf { it.isNotBlank() } ?: "android"
     }
     create("debugConfig") {
       storeFile = file("${rootDir}/debug.keystore")
@@ -135,4 +135,11 @@ dependencies {
   debugImplementation(libs.androidx.compose.ui.tooling)
   "ksp"(libs.androidx.room.compiler)
   "ksp"(libs.moshi.kotlin.codegen)
+}
+
+// Robolectric sandboxes share Compose/Espresso static state within one JVM.
+// Isolate classes so activity/service smoke tests cannot poison later UI idling.
+tasks.withType<org.gradle.api.tasks.testing.Test>().configureEach {
+  forkEvery = 1
+  maxParallelForks = 1
 }

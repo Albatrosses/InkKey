@@ -177,6 +177,12 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     fun updateTabletConfig(config: TabletConfig) {
         _tabletConfig.value = config
         TabletConfig.save(getApplication(), config)
+        barrelInput.tools.refresh()
+    }
+
+    fun reloadTabletConfig() {
+        _tabletConfig.value = TabletConfig.load(getApplication())
+        barrelInput.tools.refresh()
     }
 
     fun clearTabletFeedback() {
@@ -228,257 +234,72 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         ))
     }
 
-    fun handleHardwareKeyEvent(keyCode: Int, scanCode: Int = 0, event: KeyEvent? = null): Boolean {
-        val device = event?.device
-        val deviceName = device?.name ?: "Physical Input"
-        val vendorId = device?.vendorId ?: 0
-        val productId = device?.productId ?: 0
-        val keyName = KeyEvent.keyCodeToString(keyCode)
-
-        // 1. Check tablet Express Keys (K1..K8) FIRST so scanCodes like 309, 310, 311 from tablet keys are not swallowed as barrel buttons
-        val keyIndex = _tabletConfig.value.findMatchingKeyIndex(keyCode, scanCode, event)
-        if (keyIndex != null) {
-            val action = _tabletConfig.value.expressKeyMappings[keyIndex]
-            val debugEvent = HardwareInputDebugEvent(
-                eventType = "Key ${if (event?.action == KeyEvent.ACTION_UP) "UP" else "DOWN"}",
-                deviceName = deviceName,
-                deviceId = device?.id ?: 0,
-                vendorId = vendorId,
-                productId = productId,
-                keyCode = keyCode,
-                keyName = keyName,
-                scanCode = scanCode,
-                source = if (device != null) TabletDeviceInfo(device.id, "", 0, 0, "", device.sources, false).sourceNames.joinToString(", ") else "KEYBOARD",
-                resolvedAction = "Express Key K$keyIndex → ${action?.displayName ?: "None"}"
-            )
-            _latestDebugEvent.value = debugEvent
-
-            if (event?.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 && action != null && action != TabletAction.NONE) {
-                executeTabletAction(action)
-                _tabletFeedbackMessage.value = "K$keyIndex: ${action.displayName}"
-                return true
-            }
-            return true
-        }
-
-        // 2. Check physical stylus barrel button key codes ONLY if input is actually from a stylus device
-        val isStylusDevice = device != null && ((device.sources and InputDevice.SOURCE_STYLUS != 0) || (device.sources and InputDevice.SOURCE_BLUETOOTH_STYLUS != 0))
-        if (isStylusDevice) {
-            val isLower = keyCode == 308 || keyCode == 288
-            val isUpper = keyCode == 309 || keyCode == 310 || keyCode == 311
-            val isLowerBarrelKey = if (_tabletConfig.value.swapBarrelButtons) isUpper else isLower
-            val isUpperBarrelKey = if (_tabletConfig.value.swapBarrelButtons) isLower else isUpper
-
-            if (isLowerBarrelKey) {
-                val action = _tabletConfig.value.lowerBarrelAction
-                val debugEvent = HardwareInputDebugEvent(
-                    eventType = "Key ${if (event?.action == KeyEvent.ACTION_UP) "UP" else "DOWN"}",
-                    deviceName = deviceName,
-                    deviceId = device?.id ?: 0,
-                    vendorId = vendorId,
-                    productId = productId,
-                    keyCode = keyCode,
-                    keyName = keyName,
-                    scanCode = scanCode,
-                    source = "STYLUS_BARREL_1",
-                    resolvedAction = "Lower Barrel Button → ${action.displayName}"
-                )
-                _latestDebugEvent.value = debugEvent
-
-                if (event?.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 && action != TabletAction.NONE) {
-                    executeTabletAction(action)
-                    _tabletFeedbackMessage.value = "Lower Barrel: ${action.displayName}"
-                }
-                return true
-            }
-
-            if (isUpperBarrelKey) {
-                val action = _tabletConfig.value.upperBarrelAction
-                val debugEvent = HardwareInputDebugEvent(
-                    eventType = "Key ${if (event?.action == KeyEvent.ACTION_UP) "UP" else "DOWN"}",
-                    deviceName = deviceName,
-                    deviceId = device?.id ?: 0,
-                    vendorId = vendorId,
-                    productId = productId,
-                    keyCode = keyCode,
-                    keyName = keyName,
-                    scanCode = scanCode,
-                    source = "STYLUS_BARREL_2",
-                    resolvedAction = "Upper Barrel Button → ${action.displayName}"
-                )
-                _latestDebugEvent.value = debugEvent
-
-                if (event?.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0 && action != TabletAction.NONE) {
-                    executeTabletAction(action)
-                    _tabletFeedbackMessage.value = "Upper Barrel: ${action.displayName}"
-                }
-                return true
-            }
-        }
-
-        val debugEvent = HardwareInputDebugEvent(
-            eventType = "Key ${if (event?.action == KeyEvent.ACTION_UP) "UP" else "DOWN"}",
-            deviceName = deviceName,
-            deviceId = device?.id ?: 0,
-            vendorId = vendorId,
-            productId = productId,
-            keyCode = keyCode,
-            keyName = keyName,
-            scanCode = scanCode,
-            source = if (device != null) TabletDeviceInfo(device.id, "", 0, 0, "", device.sources, false).sourceNames.joinToString(", ") else "KEYBOARD",
-            resolvedAction = "Unmapped ($keyName)"
-        )
-        _latestDebugEvent.value = debugEvent
-
-        return false
-    }
-
-    private var upperBarrelZeroPressureActive = false
-private var upperBarrelStartX = 0f
-private var upperBarrelStartY = 0f
-private var lastUpperBarrelClickMs = 0L
-
-fun onRawTabletTouchEvent(event: MotionEvent): Boolean {
-    val action = event.actionMasked
-    val buttonState = event.buttonState or event.actionButton
-    val pressure = if (event.pointerCount > 0) event.pressure else 0f
-    val toolType = if (event.pointerCount > 0) event.getToolType(0) else 0
-    val dev = event.device
-    val isStylusOrTablet = (toolType == MotionEvent.TOOL_TYPE_STYLUS) ||
-            (toolType == MotionEvent.TOOL_TYPE_MOUSE) ||
-            (dev?.vendorId == 0x28BD) ||
-            (dev?.name?.contains("Deco", ignoreCase = true) == true) ||
-            (dev?.name?.contains("UGTABLET", ignoreCase = true) == true)
-
-    if (buttonState != 0 || toolType == MotionEvent.TOOL_TYPE_ERASER) {
-        handleGenericMotionEvent(event)
-    }
-
-    // XP-Pen Upper Barrel sends ACTION_DOWN with 0% pressure (pressure == 0.0f)
-    if (action == MotionEvent.ACTION_DOWN) {
-        if (isStylusOrTablet && buttonState == 0 && toolType != MotionEvent.TOOL_TYPE_ERASER && pressure <= 0.0005f) {
-            upperBarrelZeroPressureActive = true
-            upperBarrelStartX = event.x
-            upperBarrelStartY = event.y
-
-            val now = System.currentTimeMillis()
-            if (now - lastUpperBarrelClickMs > 250L) {
-                lastUpperBarrelClickMs = now
-                val nextTool = if (_currentTool.value == ToolType.STROKE_ERASER || _currentTool.value == ToolType.AREA_ERASER) {
-                    ToolType.PEN
-                } else {
-                    if (_tabletConfig.value.upperBarrelAction == TabletAction.AREA_ERASER) ToolType.AREA_ERASER else ToolType.STROKE_ERASER
-                }
-                setTool(nextTool)
-                val msg = if (nextTool == ToolType.PEN) {
-                    "Upper Barrel: Switched to Pen"
-                } else {
-                    "Upper Barrel: Switched to ${if (nextTool == ToolType.AREA_ERASER) "Area " else "Stroke "}Eraser"
-                }
-                _tabletFeedbackMessage.value = msg
-                _latestDebugEvent.value = HardwareInputDebugEvent(
-                    eventType = "Upper Barrel (ACTION_DOWN 0% Pressure)",
-                    deviceName = dev?.name ?: "UGTABLET Deco Mini7 V2",
-                    deviceId = dev?.id ?: 0,
-                    vendorId = dev?.vendorId ?: 0x28BD,
-                    productId = dev?.productId ?: 0x0948,
-                    source = "UPPER BARREL (0% Pressure)",
-                    buttonState = 0x40,
-                    buttonStateNames = listOf("Upper Barrel (0% Pressure)"),
-                    toolType = "TOOL_$toolType",
-                    pressure = pressure,
-                    resolvedAction = msg
-                )
-            }
-            return true
-        } else {
-            upperBarrelZeroPressureActive = false
-        }
-    } else if (action == MotionEvent.ACTION_MOVE && upperBarrelZeroPressureActive) {
-        if (pressure <= 0.0005f) {
-            val dist = kotlin.math.hypot(event.x - upperBarrelStartX, event.y - upperBarrelStartY)
-            if (dist > 6f) {
-                val cx = (event.x - _panOffset.value.x) / _zoomScale.value
-                val cy = (event.y - _panOffset.value.y) / _zoomScale.value
-                if (_tabletConfig.value.upperBarrelAction == TabletAction.AREA_ERASER) {
-                    eraseAreaStrokes(cx, cy, _eraserSize.value.radius)
-                } else {
-                    eraseStrokesNear(cx, cy, _eraserSize.value.radius)
-                }
-            }
-            return true
-        } else {
-            upperBarrelZeroPressureActive = false
-        }
-    } else if ((action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_CANCEL) && upperBarrelZeroPressureActive) {
-        upperBarrelZeroPressureActive = false
+    private val barrelInput = com.example.util.BarrelInputRouter({ _tabletConfig.value }, ::executeTabletAction)
+    val transientBarrelTool = barrelInput.tools.tool
+    val isBarrelActive = barrelInput.tools.active
+    val barrelToolOverride: ToolType? get() = transientBarrelTool.value
+    fun clearTransientBarrelTool() = barrelInput.reset()
+    fun triggerUpperBarrelFunction(isDown: Boolean = true): Boolean {
+        barrelInput.tools.setPressed(com.example.util.BarrelToolController.Input.KEY_UPPER, isDown)
         return true
     }
-    return false
-}
+    fun triggerLowerBarrelFunction(isDown: Boolean = true): Boolean {
+        barrelInput.tools.setPressed(com.example.util.BarrelToolController.Input.KEY_LOWER, isDown)
+        return true
+    }
+    fun handleBarrelHover(event: MotionEvent) { barrelInput.hover(event) }
+    fun resetBarrelInput() = barrelInput.reset()
+    fun handleTouchMotionEvent(event: MotionEvent): Boolean { barrelInput.touch(event); return false }
+    fun handleGenericMotionEvent(event: MotionEvent): Boolean = barrelInput.hover(event)
 
-fun handleGenericMotionEvent(event: MotionEvent): Boolean {
-        val device = event.device
-        val buttonState = event.buttonState
-        val actionMasked = event.actionMasked
-        val actionButton = event.actionButton
-        val buttonNames = mutableListOf<String>()
-        if (buttonState and MotionEvent.BUTTON_PRIMARY != 0) buttonNames.add("Tip (Primary)")
-        if (buttonState and MotionEvent.BUTTON_SECONDARY != 0) buttonNames.add("Barrel 1 (Secondary)")
-        if (buttonState and MotionEvent.BUTTON_TERTIARY != 0) buttonNames.add("Barrel 2 (Tertiary)")
-        if (buttonState and MotionEvent.BUTTON_STYLUS_PRIMARY != 0) buttonNames.add("Stylus Barrel 1")
-        if (buttonState and MotionEvent.BUTTON_STYLUS_SECONDARY != 0) buttonNames.add("Stylus Barrel 2")
-        if (buttonState and MotionEvent.BUTTON_FORWARD != 0) buttonNames.add("Forward (Barrel 2)")
-        if (buttonState and MotionEvent.BUTTON_BACK != 0) buttonNames.add("Back")
-
-        val isBarrel1 = (buttonState and (MotionEvent.BUTTON_STYLUS_PRIMARY or MotionEvent.BUTTON_SECONDARY) != 0) ||
-                (actionButton == MotionEvent.BUTTON_STYLUS_PRIMARY || actionButton == MotionEvent.BUTTON_SECONDARY)
-        val isBarrel2 = (buttonState and (MotionEvent.BUTTON_STYLUS_SECONDARY or MotionEvent.BUTTON_TERTIARY or MotionEvent.BUTTON_FORWARD or MotionEvent.BUTTON_BACK) != 0) ||
-                (actionButton == MotionEvent.BUTTON_STYLUS_SECONDARY || actionButton == MotionEvent.BUTTON_TERTIARY || actionButton == MotionEvent.BUTTON_FORWARD || actionButton == MotionEvent.BUTTON_BACK)
-
-        val resolved = when {
-            isBarrel1 -> "Lower Barrel: ${_tabletConfig.value.lowerBarrelAction.displayName}"
-            isBarrel2 -> "Upper Barrel: ${_tabletConfig.value.upperBarrelAction.displayName}"
-            else -> ""
+    fun handleHardwareKeyEvent(keyCode: Int, scanCode: Int = 0, event: KeyEvent? = null): Boolean {
+        // The keyboard can change shared mappings without pausing this Activity.
+        val loadedConfig = TabletConfig.load(getApplication())
+        if (loadedConfig != _tabletConfig.value) {
+            _tabletConfig.value = loadedConfig
+            barrelInput.tools.refresh()
         }
-
-        if (buttonState != 0 || actionMasked == MotionEvent.ACTION_BUTTON_PRESS || actionMasked == MotionEvent.ACTION_HOVER_MOVE) {
-            val debugEvent = HardwareInputDebugEvent(
-                eventType = "MotionEvent (${MotionEvent.actionToString(actionMasked)})",
-                deviceName = device?.name ?: "Stylus / Tablet",
-                deviceId = device?.id ?: 0,
-                vendorId = device?.vendorId ?: 0,
-                productId = device?.productId ?: 0,
-                source = "STYLUS / TABLET",
-                buttonState = buttonState,
-                buttonStateNames = buttonNames,
-                toolType = if (event.pointerCount > 0) {
-                    when (event.getToolType(0)) {
-                        MotionEvent.TOOL_TYPE_STYLUS -> "STYLUS"
-                        MotionEvent.TOOL_TYPE_ERASER -> "ERASER"
-                        MotionEvent.TOOL_TYPE_FINGER -> "FINGER"
-                        MotionEvent.TOOL_TYPE_MOUSE -> "MOUSE"
-                        else -> "UNKNOWN"
-                    }
-                } else "",
-                pressure = if (event.pointerCount > 0) event.pressure else 0f,
-                resolvedAction = resolved
-            )
-            _latestDebugEvent.value = debugEvent
+        val config = _tabletConfig.value
+        val device = event?.device
+        val isXpPen = com.example.util.XpPenExpressKeyResolver.isXpPen(event)
+        val knownXpIndex = event?.let { com.example.util.XpPenExpressKeyResolver.resolve(it) }
+        val customIndex = com.example.util.XpPenExpressKeyResolver.resolveCustomBinding(keyCode, scanCode, config.customKeyCodes, config.customScanCodes)
+        val fallbackIndex = if (isXpPen) null else config.findMatchingKeyIndex(keyCode, scanCode, event)
+        val keyIndex = customIndex ?: knownXpIndex ?: fallbackIndex
+        val target = com.example.util.StylusHardwareDetector.classifyKeyEvent(keyCode, scanCode, event)
+        val custom = customIndex != null
+        val express = keyIndex != null && (isXpPen || custom || target == com.example.util.StylusHardwareDetector.BarrelTarget.NONE)
+        _latestDebugEvent.value = HardwareInputDebugEvent(
+            eventType = "Key ${if (event?.action == KeyEvent.ACTION_UP) "UP" else "DOWN"}",
+            deviceName = device?.name ?: "Physical Input", deviceId = device?.id ?: 0,
+            vendorId = device?.vendorId ?: 0, productId = device?.productId ?: 0,
+            keyCode = keyCode, keyName = KeyEvent.keyCodeToString(keyCode), scanCode = scanCode,
+            source = "KEYBOARD / STYLUS", resolvedAction = if (express) "Express Key K$keyIndex" else target.name)
+        if (express) {
+            val action = config.expressKeyMappings[keyIndex] ?: TabletAction.NONE
+            if ((event == null || event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) && action != TabletAction.NONE) {
+                executeTabletAction(action)
+                _tabletFeedbackMessage.value = "K$keyIndex: ${action.displayName}"
+            }
+            return true
         }
-
-        // Execute action if hover button press is detected
-        if (actionMasked == MotionEvent.ACTION_BUTTON_PRESS) {
-            if (isBarrel1 && _tabletConfig.value.lowerBarrelAction != TabletAction.NONE) {
-                executeTabletAction(_tabletConfig.value.lowerBarrelAction)
-                _tabletFeedbackMessage.value = "Lower Barrel: ${_tabletConfig.value.lowerBarrelAction.displayName}"
-                return true
+        if (target != com.example.util.StylusHardwareDetector.BarrelTarget.NONE) {
+            val down = event == null || event.action == KeyEvent.ACTION_DOWN
+            if (!down || event == null || event.repeatCount == 0) {
+                if (target == com.example.util.StylusHardwareDetector.BarrelTarget.UPPER_BARREL) triggerUpperBarrelFunction(down)
+                else triggerLowerBarrelFunction(down)
             }
-            if (isBarrel2 && _tabletConfig.value.upperBarrelAction != TabletAction.NONE) {
-                executeTabletAction(_tabletConfig.value.upperBarrelAction)
-                _tabletFeedbackMessage.value = "Upper Barrel: ${_tabletConfig.value.upperBarrelAction.displayName}"
-                return true
+            return true
+        }
+        if (event != null && isXpPen && com.example.util.XpPenExpressKeyResolver.isCompositePrefix(event)) {
+            return true
+        }
+        if (event != null && isXpPen) {
+            if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                val rawName = KeyEvent.keyCodeToString(event.keyCode).removePrefix("KEYCODE_")
+                _tabletFeedbackMessage.value = "XP-Pen unmapped: $rawName · scan ${event.scanCode}"
             }
+            return true
         }
         return false
     }
@@ -724,15 +545,15 @@ fun handleGenericMotionEvent(event: MotionEvent): Boolean {
 
     // Zoom & Pan
     fun setZoomScale(scale: Float) {
-        _zoomScale.value = scale.coerceIn(0.5f, 3.5f)
+        _zoomScale.value = scale.coerceIn(0.1f, 3f)
     }
 
     fun zoomIn() {
-        setZoomScale(_zoomScale.value + 0.25f)
+        setZoomScale(_zoomScale.value + 0.1f)
     }
 
     fun zoomOut() {
-        setZoomScale(_zoomScale.value - 0.25f)
+        setZoomScale(_zoomScale.value - 0.1f)
     }
 
     fun resetZoom() {
@@ -970,7 +791,7 @@ fun handleGenericMotionEvent(event: MotionEvent): Boolean {
 
         // Apply shape snapping if enabled
         val finalStroke = if (_shapeModeEnabled.value) {
-            ShapeRecognizer.recognizeAndSnap(live)
+            ShapeRecognizer.recognizeAndSnap(live.copy(shapeType = _selectedShapeType.value))
         } else {
             live
         }
@@ -1184,6 +1005,18 @@ fun handleGenericMotionEvent(event: MotionEvent): Boolean {
         if (id != null) {
             _currentTool.value = ToolType.SYMBOL_EDIT
         }
+    }
+
+    fun updateAnnotationText(id: String, text: String) {
+        if (text.isBlank()) return
+        val doc = _currentDocument.value
+        val index = _currentPageIndex.value
+        if (doc.pages.getOrNull(index)?.textAnnotations?.none { it.id == id && it.text != text } != false) return
+        saveUndoSnapshot()
+        _currentDocument.value = doc.copy(pages = doc.pages.map { page ->
+            if (page.pageIndex == index) page.copy(textAnnotations = page.textAnnotations.map { if (it.id == id) it.copy(text = text) else it }) else page
+        })
+        scheduleAutoSave()
     }
 
     fun moveAnnotation(id: String, newX: Float, newY: Float) {

@@ -369,15 +369,15 @@ class InkKeyFunctionalTests {
         assertEquals(150f, viewModel.panOffset.value.x)
         assertEquals(-320f, viewModel.panOffset.value.y)
 
-        // Zoom scale with clamp [0.5, 3.5]
+        // Restored zoom range: 0.1 to 3.0
         viewModel.setZoomScale(2.5f)
         assertEquals(2.5f, viewModel.zoomScale.value)
 
         viewModel.setZoomScale(10.0f) // Beyond max
-        assertEquals(3.5f, viewModel.zoomScale.value)
+        assertEquals(3f, viewModel.zoomScale.value)
 
-        viewModel.setZoomScale(0.1f) // Below min
-        assertEquals(0.5f, viewModel.zoomScale.value)
+        viewModel.setZoomScale(0.01f) // Below min
+        assertEquals(0.1f, viewModel.zoomScale.value)
 
         // Reset zoom & pan
         viewModel.resetZoom()
@@ -394,9 +394,9 @@ class InkKeyFunctionalTests {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val viewModel = com.example.viewmodel.MainViewModel(context as android.app.Application)
 
-        // Default: lower is AREA_ERASER, upper is HAND
+        // Maintained default: lower AREA_ERASER, upper STROKE_ERASER
         assertEquals(com.example.model.TabletAction.AREA_ERASER, viewModel.tabletConfig.value.lowerBarrelAction)
-        assertEquals(com.example.model.TabletAction.HAND, viewModel.tabletConfig.value.upperBarrelAction)
+        assertEquals(com.example.model.TabletAction.STROKE_ERASER, viewModel.tabletConfig.value.upperBarrelAction)
 
         // Customize lower barrel button to UNDO, upper barrel button to AREA_ERASER
         val customConfig = viewModel.tabletConfig.value.copy(

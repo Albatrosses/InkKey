@@ -181,6 +181,22 @@ data class TextAnnotation(
         return localX in (bounds.left - padding)..(bounds.right + padding) &&
                 localY in (bounds.top - padding)..(bounds.bottom + padding)
     }
+
+    fun selectionCorners(padding: Float = 8f): List<DrawingPoint> {
+        val bounds = getRenderedBounds()
+        val angle = Math.toRadians(rotation.toDouble())
+        val c = kotlin.math.cos(angle).toFloat(); val s = kotlin.math.sin(angle).toFloat()
+        return listOf(bounds.left - padding to bounds.top - padding,
+            bounds.right + padding to bounds.top - padding,
+            bounds.right + padding to bounds.bottom + padding,
+            bounds.left - padding to bounds.bottom + padding).map { (u, v) -> DrawingPoint(x + u*c - v*s, y + u*s + v*c) }
+    }
+
+    fun hitResizeHandle(cx: Float, cy: Float, zoomScale: Float): Boolean {
+        if (hitTest(cx, cy, padding = 0f)) return false // Glyph body always drags.
+        val radius = 10f / zoomScale.coerceAtLeast(0.1f)
+        return selectionCorners().any { kotlin.math.hypot(cx-it.x, cy-it.y) <= radius }
+    }
 }
 
 

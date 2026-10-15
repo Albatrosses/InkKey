@@ -84,12 +84,32 @@ class InkKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewModel
         currentComposeView?.disposeComposition()
 
         val themedContext = ContextThemeWrapper(this, R.style.Theme_MyApplication)
+        val inputRepo = com.example.ime.data.ImeDocumentRepository.getInstance(this)
         val composeView = ComposeView(themedContext)
+        val rootView = object : android.widget.FrameLayout(themedContext) {
+            override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean {
+                inputRepo.handleTouchMotionEvent(event)
+                return super.dispatchTouchEvent(event)
+            }
+
+            override fun dispatchGenericMotionEvent(event: android.view.MotionEvent): Boolean {
+                val handled = inputRepo.handleGenericMotionEvent(event)
+                return if (handled) true else super.dispatchGenericMotionEvent(event)
+            }
+
+            override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+                return if (com.example.util.InputOwnership.routeImeHardwareKey(isInputViewShown) { inputRepo.handleHardwareKeyEvent(event) }) true else super.dispatchKeyEvent(event)
+            }
+
+            override fun dispatchKeyEventPreIme(event: KeyEvent): Boolean {
+                return if (com.example.util.InputOwnership.routeImeHardwareKey(isInputViewShown) { inputRepo.handleHardwareKeyEvent(event) }) true else super.dispatchKeyEventPreIme(event)
+            }
+        }
         composeView.setViewTreeLifecycleOwner(this)
         composeView.setViewTreeViewModelStoreOwner(this)
         composeView.setViewTreeSavedStateRegistryOwner(this)
         composeView.setParentCompositionContext(recomposer)
-        composeView.setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindowOrReleasedFromPool)
+        composeView.setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
 
         composeView.setContent {
             MyApplicationTheme {
@@ -119,14 +139,21 @@ class InkKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewModel
             }
         }
         currentComposeView = composeView
-        return composeView
+        rootView.addView(
+            composeView,
+            android.widget.FrameLayout.LayoutParams(
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT,
+                android.view.ViewGroup.LayoutParams.MATCH_PARENT
+            )
+        )
+        return rootView
     }
 
     override fun onFinishInputView(finishingInput: Boolean) {
         super.onFinishInputView(finishingInput)
         // Note: Android reuses the InputView returned by onCreateInputView across show/hide cycles.
         // Disposing composition here breaks subsequent keyboard sessions.
-        // ViewCompositionStrategy.DisposeOnDetachedFromWindowOrReleasedFromPool and onDestroy() handle proper disposal.
+        // ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed and onDestroy() handle proper disposal.
         try {
             val repo = com.example.ime.data.ImeDocumentRepository.getInstance(this)
             repo.clearTransientState()
@@ -136,6 +163,7 @@ class InkKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewModel
 
     override fun onWindowShown() {
         super.onWindowShown()
+        com.example.ime.data.ImeDocumentRepository.getInstance(this).reloadTabletConfig()
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_START)
         lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
     }
@@ -171,6 +199,30 @@ class InkKeyInputMethodService : InputMethodService(), LifecycleOwner, ViewModel
         recomposer?.cancel()
     }
 
+
+    override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK) return super.onKeyDown(keyCode, event)
+        val repo = com.example.ime.data.ImeDocumentRepository.getInstance(this)
+        val ownsInput = com.example.util.InputOwnership.imeOwnsHardwareInput(isInputViewShown)
+        val handled = com.example.util.InputOwnership.routeImeHardwareKey(ownsInput) { repo.handleHardwareKeyEvent(event) }
+        if (handled) return true
+        return super.onKeyDown(keyCode, event)
+    }
+
+    override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean {
+        if (keyCode == KeyEvent.KEYCODE_BACK) return super.onKeyUp(keyCode, event)
+        val repo = com.example.ime.data.ImeDocumentRepository.getInstance(this)
+        val ownsInput = com.example.util.InputOwnership.imeOwnsHardwareInput(isInputViewShown)
+        val handled = com.example.util.InputOwnership.routeImeHardwareKey(ownsInput) { repo.handleHardwareKeyEvent(event) }
+        if (handled) return true
+        return super.onKeyUp(keyCode, event)
+    }
+
+    override fun onGenericMotionEvent(event: android.view.MotionEvent): Boolean {
+        if (!isInputViewShown) return super.onGenericMotionEvent(event)
+        if (com.example.ime.data.ImeDocumentRepository.getInstance(this).handleGenericMotionEvent(event)) return true
+        return super.onGenericMotionEvent(event)
+    }
 
     private fun commitHandwrittenImage(file: File) {
         val ic = currentInputConnection

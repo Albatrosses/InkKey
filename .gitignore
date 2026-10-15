@@ -1,0 +1,12 @@
+.gradle/
+**/build/
+local.properties
+.env
+*.keystore
+*.jks
+
+# Private signing recovery material and generated artifacts
+backup-private.pem
+InkKey-signing-backup.zip
+InkKey-signing-backup.enc
+InkKey-*.apk

@@ -16,42 +16,57 @@ import kotlin.math.sqrt
 object ShapeRecognizer {
 
     fun recognizeAndSnap(stroke: DrawingStroke): DrawingStroke {
-        val points = stroke.points
-        if (points.size < 3) return stroke
-    if (stroke.shapeType != ShapeType.NONE) {
-        val s = points.first()
-        val e = points.last()
-        val minX = points.minOf { it.x }
-        val maxX = points.maxOf { it.x }
-        val minY = points.minOf { it.y }
-        val maxY = points.maxOf { it.y }
-        val cx = (minX + maxX) / 2f
-        val cy = (minY + maxY) / 2f
-        when (stroke.shapeType) {
-            ShapeType.LINE -> return stroke.copy(points = listOf(DrawingPoint(s.x, s.y), DrawingPoint(e.x, e.y)), isShape = true, shapeType = ShapeType.LINE)
-            ShapeType.RECTANGLE -> return stroke.copy(points = listOf(DrawingPoint(minX, minY), DrawingPoint(maxX, minY), DrawingPoint(maxX, maxY), DrawingPoint(minX, maxY), DrawingPoint(minX, minY)), isShape = true, shapeType = ShapeType.RECTANGLE)
-            ShapeType.TRIANGLE -> return stroke.copy(points = listOf(DrawingPoint(cx, minY), DrawingPoint(maxX, maxY), DrawingPoint(minX, maxY), DrawingPoint(cx, minY)), isShape = true, shapeType = ShapeType.TRIANGLE)
-            ShapeType.CIRCLE -> {
-                val r = max(maxX - minX, maxY - minY) / 2f
-                val cPts = (0..48).map { idx ->
-                    val ang = 2f * PI.toFloat() * idx / 48
-                    DrawingPoint(cx + r * cos(ang), cy + r * sin(ang), 1f)
-                }
-                return stroke.copy(points = cPts, isShape = true, shapeType = ShapeType.CIRCLE)
-            }
-            ShapeType.ELLIPSE -> {
-                val a = (maxX - minX) / 2f
-                val b = (maxY - minY) / 2f
-                val ePts = (0..48).map { idx ->
-                    val ang = 2f * PI.toFloat() * idx / 48
-                    DrawingPoint(cx + a * cos(ang), cy + b * sin(ang), 1f)
-                }
-                return stroke.copy(points = ePts, isShape = true, shapeType = ShapeType.ELLIPSE)
-            }
-            else -> {}
+        if (stroke.points.any { !it.x.isFinite() || !it.y.isFinite() }) return stroke
+        var points: List<DrawingPoint> = stroke.points.fold(mutableListOf<DrawingPoint>()) { kept, point ->
+            if (kept.isEmpty() || hypot(point.x - kept.last().x, point.y - kept.last().y) > 0.25f) kept.add(point)
+            kept
         }
-    }
-    if (points.size < 6) return stroke
+        if (points.size < 2) return stroke
+        if (stroke.shapeType != ShapeType.NONE) {
+            val s = points.first()
+            val e = points.last()
+            val minX = points.minOf { it.x }
+            val maxX = points.maxOf { it.x }
+            val minY = points.minOf { it.y }
+            val maxY = points.maxOf { it.y }
+            val cx = (minX + maxX) / 2f
+            val cy = (minY + maxY) / 2f
+            when (stroke.shapeType) {
+                ShapeType.LINE -> return stroke.copy(points = listOf(DrawingPoint(s.x, s.y), DrawingPoint(e.x, e.y)), isShape = true, shapeType = ShapeType.LINE)
+                ShapeType.ARROW -> {
+                    val length = hypot(e.x - s.x, e.y - s.y)
+                    if (length < 2f) return stroke
+                    val angle = atan2(e.y - s.y, e.x - s.x)
+                    val head = min(32f, length * 0.28f)
+                    return stroke.copy(points = listOf(s, e,
+                        DrawingPoint(e.x - head * cos(angle - 0.48f), e.y - head * sin(angle - 0.48f)), e,
+                        DrawingPoint(e.x - head * cos(angle + 0.48f), e.y - head * sin(angle + 0.48f))), isShape = true, shapeType = ShapeType.ARROW)
+                }
+                ShapeType.RECTANGLE -> return stroke.copy(points = listOf(DrawingPoint(minX, minY), DrawingPoint(maxX, minY), DrawingPoint(maxX, maxY), DrawingPoint(minX, maxY), DrawingPoint(minX, minY)), isShape = true, shapeType = ShapeType.RECTANGLE)
+                ShapeType.TRIANGLE -> return stroke.copy(points = listOf(DrawingPoint(cx, minY), DrawingPoint(maxX, maxY), DrawingPoint(minX, maxY), DrawingPoint(cx, minY)), isShape = true, shapeType = ShapeType.TRIANGLE)
+                ShapeType.CIRCLE -> {
+                    val r = max(maxX - minX, maxY - minY) / 2f
+                    val cPts = (0..48).map { idx ->
+                        val ang = 2f * PI.toFloat() * idx / 48
+                        DrawingPoint(cx + r * cos(ang), cy + r * sin(ang), 1f)
+                    }
+                    return stroke.copy(points = cPts, isShape = true, shapeType = ShapeType.CIRCLE)
+                }
+                ShapeType.ELLIPSE -> {
+                    val a = (maxX - minX) / 2f
+                    val b = (maxY - minY) / 2f
+                    val ePts = (0..48).map { idx ->
+                        val ang = 2f * PI.toFloat() * idx / 48
+                        DrawingPoint(cx + a * cos(ang), cy + b * sin(ang), 1f)
+                    }
+                    return stroke.copy(points = ePts, isShape = true, shapeType = ShapeType.ELLIPSE)
+                }
+                else -> {}
+            }
+        }
+        if (points.size < 3) return stroke
+        points = resampleByDistance(points)
+        if (points.size < 6) return stroke
 
         val start = points.first()
         val end = points.last()
@@ -83,7 +98,7 @@ object ShapeRecognizer {
         val minBoxDim = min(boxWidth, boxHeight)
 
         // Determine if stroke forms a closed shape
-        val isClosed = (directDist <= 0.28f * maxBoxDim) || (directDist <= 45f && totalLength > 80f)
+        val isClosed = directDist <= max(6f, 0.20f * maxBoxDim)
 
         if (isClosed && points.size >= 10 && minBoxDim >= 14f) {
             val centerX = (minX + maxX) / 2f
@@ -124,14 +139,8 @@ object ShapeRecognizer {
             // Method A: 4 clear corner vertices with roughly 90-degree internal angles
             if (corners.size == 4) {
                 val anglesValid = areRectangleAngles(corners)
-                if (anglesValid) {
-                    val snappedRect = listOf(
-                        DrawingPoint(minX, minY),
-                        DrawingPoint(maxX, minY),
-                        DrawingPoint(maxX, maxY),
-                        DrawingPoint(minX, maxY),
-                        DrawingPoint(minX, minY)
-                    )
+                if (anglesValid && arePolygonSidesLinear(points, corners)) {
+                    val snappedRect = orientedRectangle(points, corners)
                     return stroke.copy(
                         points = snappedRect,
                         isShape = true,
@@ -188,7 +197,7 @@ object ShapeRecognizer {
             val minCornerDist = minOf(dTL, dTR, dBR, dBL)
             val avoidsCorners = minCornerDist >= 0.14f * minBoxDim
 
-            if (aspectRatio in 0.80f..1.25f && cv < 0.22f && angularCoverage >= 275f && avoidsCorners) {
+            if (aspectRatio in 0.80f..1.25f && cv < 0.18f && angularCoverage in 300f..420f && avoidsCorners) {
                 val circlePoints = mutableListOf<DrawingPoint>()
                 val numSamples = 48
                 val radius = (boxWidth + boxHeight) / 4f
@@ -205,37 +214,10 @@ object ShapeRecognizer {
                 )
             }
 
-            // 4. ELLIPSE CHECK (smooth curved loop with elongated aspect ratio)
-            // An ellipse has aspect ratio significantly different from 1:1, or non-uniform radial distribution fitting (x/a)^2 + (y/b)^2 = 1
-            if (angularCoverage >= 315f && avoidsCorners && (aspectRatio < 0.82f || aspectRatio > 1.22f)) {
-                val a = boxWidth / 2f
-                val b = boxHeight / 2f
-                if (a > 5f && b > 5f) {
-                    val normDistances = points.map { p ->
-                        val dx = (p.x - centerX) / a
-                        val dy = (p.y - centerY) / b
-                        hypot(dx, dy)
-                    }
-                    val meanNorm = normDistances.average().toFloat()
-                    val normVariance = normDistances.map { (it - meanNorm) * (it - meanNorm) }.average().toFloat()
-                    val normStdDev = sqrt(normVariance)
-
-                    if (meanNorm in 0.82f..1.20f && normStdDev < 0.16f) {
-                        val ellipsePoints = mutableListOf<DrawingPoint>()
-                        val numSamples = 48
-                        for (s in 0..numSamples) {
-                            val angle = 2f * PI.toFloat() * s / numSamples
-                            val px = centerX + a * cos(angle)
-                            val py = centerY + b * sin(angle)
-                            ellipsePoints.add(DrawingPoint(px, py, 1f))
-                        }
-                        return stroke.copy(
-                            points = ellipsePoints,
-                            isShape = true,
-                            shapeType = ShapeType.ELLIPSE
-                        )
-                    }
-                }
+            // Fit in the stroke's principal axes so tilted ellipses keep their rotation.
+            if (angularCoverage in 300f..420f) {
+                val ellipse = fitOrientedEllipse(points)
+                if (ellipse != null) return stroke.copy(points = ellipse, isShape = true, shapeType = ShapeType.ELLIPSE)
             }
 
             // If closed but confidence is insufficient: PRESERVE FREEHAND!
@@ -250,16 +232,12 @@ object ShapeRecognizer {
         // 5. ARROW CHECK
         // Check if stroke forms a straight shaft followed by an arrowhead barb
         if (points.size >= 8) {
-            // Find the point furthest from start - likely the tip of the arrow
-            var maxDistFromStart = 0f
-            var tipIdx = 0
-            for (i in points.indices) {
-                val d = hypot(points[i].x - start.x, points[i].y - start.y)
-                if (d > maxDistFromStart) {
-                    maxDistFromStart = d
-                    tipIdx = i
-                }
-            }
+            // Use the first outward peak near the furthest point. An arrow often
+            // revisits its tip while drawing the second barb; that revisit is not the shaft.
+            val distances = points.map { hypot(it.x - start.x, it.y - start.y) }
+            val maxDistFromStart = distances.maxOrNull() ?: 0f
+            var tipIdx = distances.indexOfFirst { it >= maxDistFromStart * 0.98f }.coerceAtLeast(0)
+            while (tipIdx < distances.lastIndex && distances[tipIdx + 1] > distances[tipIdx]) tipIdx++
 
             // Tip should be past the middle of the stroke (shaft first, then arrowhead)
             if (tipIdx >= (points.size * 0.50f).toInt() && tipIdx < points.size - 2 && maxDistFromStart >= 30f) {
@@ -299,9 +277,9 @@ object ShapeRecognizer {
         }
 
         // 6. STRAIGHT LINE CHECK
-        if (straightnessRatio >= 0.85f && totalLength >= 25f) {
+        if (straightnessRatio >= 0.92f && totalLength >= 25f) {
             val maxPerpDev = points.maxOf { p -> perpendicularDistance(p, start, end) }
-            if (maxPerpDev <= max(12f, 0.08f * directDist)) {
+            if (maxPerpDev <= max(2.5f, 0.06f * directDist)) {
                 val snappedLine = listOf(
                     DrawingPoint(start.x, start.y),
                     DrawingPoint(end.x, end.y)
@@ -316,6 +294,65 @@ object ShapeRecognizer {
 
         // If confidence is insufficient, preserve original freehand stroke!
         return stroke
+    }
+
+    /** Equal arc-length sampling prevents slow/dense parts of a stroke from dominating a fit. */
+    private fun resampleByDistance(points: List<DrawingPoint>): List<DrawingPoint> {
+        val lengths = points.zipWithNext { a, b -> hypot(b.x - a.x, b.y - a.y) }
+        val total = lengths.sum()
+        if (total < 1f) return points
+        val count = (total / 4f).toInt().coerceIn(24, 160)
+        val result = mutableListOf(points.first())
+        var segment = 0
+        var before = 0f
+        for (i in 1 until count) {
+            val target = total * i / count
+            while (segment < lengths.lastIndex && before + lengths[segment] < target) {
+                before += lengths[segment]; segment++
+            }
+            val t = ((target - before) / lengths[segment].coerceAtLeast(0.0001f)).coerceIn(0f, 1f)
+            val a = points[segment]; val b = points[segment + 1]
+            result.add(DrawingPoint(a.x + (b.x - a.x) * t, a.y + (b.y - a.y) * t, a.pressure + (b.pressure - a.pressure) * t))
+        }
+        result.add(points.last())
+        return result
+    }
+
+    private fun orientedRectangle(points: List<DrawingPoint>, corners: List<DrawingPoint>): List<DrawingPoint> {
+        val a = corners[0]; val b = corners[1]
+        val angle = atan2(b.y - a.y, b.x - a.x)
+        val ux = cos(angle); val uy = sin(angle)
+        val vx = -uy; val vy = ux
+        val us = points.map { it.x * ux + it.y * uy }
+        val vs = points.map { it.x * vx + it.y * vy }
+        val minU = us.minOrNull()!!; val maxU = us.maxOrNull()!!
+        val minV = vs.minOrNull()!!; val maxV = vs.maxOrNull()!!
+        fun p(u: Float, v: Float) = DrawingPoint(u * ux + v * vx, u * uy + v * vy)
+        return listOf(p(minU, minV), p(maxU, minV), p(maxU, maxV), p(minU, maxV), p(minU, minV))
+    }
+
+    private fun fitOrientedEllipse(points: List<DrawingPoint>): List<DrawingPoint>? {
+        val mx = points.map { it.x }.average().toFloat()
+        val my = points.map { it.y }.average().toFloat()
+        val xx = points.sumOf { ((it.x - mx) * (it.x - mx)).toDouble() }
+        val yy = points.sumOf { ((it.y - my) * (it.y - my)).toDouble() }
+        val xy = points.sumOf { ((it.x - mx) * (it.y - my)).toDouble() }
+        val angle = (0.5 * atan2(2.0 * xy, xx - yy)).toFloat()
+        val ux = cos(angle); val uy = sin(angle)
+        val us = points.map { (it.x - mx) * ux + (it.y - my) * uy }
+        val vs = points.map { -(it.x - mx) * uy + (it.y - my) * ux }
+        val cu = (us.minOrNull()!! + us.maxOrNull()!!) / 2f
+        val cv = (vs.minOrNull()!! + vs.maxOrNull()!!) / 2f
+        val a = (us.maxOrNull()!! - us.minOrNull()!!) / 2f
+        val b = (vs.maxOrNull()!! - vs.minOrNull()!!) / 2f
+        if (a < 6f || b < 6f) return null
+        val errors = us.indices.map { abs(hypot((us[it] - cu) / a, (vs[it] - cv) / b) - 1f) }
+        if (errors.average() > 0.12 || errors.count { it > 0.25f } > points.size / 10) return null
+        return (0..64).map { i ->
+            val t = 2f * PI.toFloat() * i / 64
+            val u = cu + a * cos(t); val v = cv + b * sin(t)
+            DrawingPoint(mx + u * ux - v * uy, my + u * uy + v * ux)
+        }
     }
 
     // Douglas-Peucker line simplification algorithm
@@ -362,6 +399,17 @@ object ShapeRecognizer {
         // If last point is close to first point, drop the duplicate
         if (cleaned.size > 2 && hypot(cleaned.first().x - cleaned.last().x, cleaned.first().y - cleaned.last().y) <= directDistThreshold) {
             cleaned.removeAt(cleaned.size - 1)
+        }
+        var changed = true
+        while (changed && cleaned.size > 3) {
+            changed = false
+            for (i in cleaned.indices) {
+                val before = cleaned[(i + cleaned.size - 1) % cleaned.size]
+                val after = cleaned[(i + 1) % cleaned.size]
+                if (angleBetween(before, cleaned[i], after) > 155f) {
+                    cleaned.removeAt(i); changed = true; break
+                }
+            }
         }
         return cleaned
     }

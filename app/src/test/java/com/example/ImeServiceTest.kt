@@ -374,6 +374,7 @@ class ImeServiceTest {
 
         val inputView = service.onCreateInputView()
         assertNotNull(inputView)
+        controller.destroy()
     }
 
     @Test
@@ -488,5 +489,6 @@ class ImeServiceTest {
         val activity = controller.setup().get()
         assertNotNull(activity)
         assertFalse(activity.isFinishing)
+        controller.pause().stop().destroy()
     }
 }

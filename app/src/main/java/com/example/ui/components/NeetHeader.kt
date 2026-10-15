@@ -2,6 +2,8 @@ package com.example.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -94,71 +96,38 @@ fun NeetHeader(
         shadowElevation = 3.dp
     ) {
         Column {
-            TopAppBar(
-                title = {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier
-                            .clickable { showEditInfoDialog = true }
-                            .testTag("document_title_button")
-                    ) {
-                        // Subject badge
-                        Box(
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(document.subject.colorHex))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = document.subject.displayName,
-                                color = Color.White,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
+            // Fixed navigation control + independent scrollable tool strip.
+            // Keeping these in separate layout layers prevents the back button from
+            // ever sharing/overlapping the toolbar's horizontal space.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(64.dp)
+            ) {
+                IconButton(
+                    onClick = onBackToHome,
+                    modifier = Modifier
+                        .align(Alignment.CenterStart)
+                        .padding(start = 4.dp)
+                        .size(48.dp)
+                        .testTag("header_back_button")
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back to Home",
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
 
-                        Spacer(modifier = Modifier.width(6.dp))
-
-                        Column {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Text(
-                                    text = "${document.questionNumber}: ${document.title}",
-                                    fontSize = 14.sp,
-                                    fontWeight = FontWeight.SemiBold,
-                                    maxLines = 1
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Icon(
-                                    imageVector = Icons.Default.Edit,
-                                    contentDescription = "Edit title",
-                                    modifier = Modifier.size(13.dp),
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                            Text(
-                                text = "${document.paperStyle.displayName} • ${document.scrollMode.displayName}",
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                },
-                navigationIcon = {
-                    Box(modifier = Modifier.padding(start = 4.dp)) {
-                        IconButton(
-                            onClick = onBackToHome,
-                            modifier = Modifier.size(48.dp).testTag("header_back_button")
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "Back to Home",
-                                modifier = Modifier.size(24.dp)
-                            )
-                        }
-                    }
-                },
-                actions = {
-                    // Undo & Redo with distinct non-overlapping touch targets
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(64.dp)
+                        .padding(start = 64.dp, end = 4.dp)
+                        .horizontalScroll(rememberScrollState()),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(0.dp)
+                ) {
                     IconButton(
                         onClick = { viewModel.undo() },
                         enabled = canUndo,
@@ -185,7 +154,6 @@ fun NeetHeader(
                         )
                     }
 
-                    // Full Screen Button
                     IconButton(
                         onClick = onToggleFullScreen,
                         modifier = Modifier.size(44.dp).testTag("header_fullscreen_button")
@@ -198,7 +166,6 @@ fun NeetHeader(
                         )
                     }
 
-                    // Theme selector
                     Box {
                         IconButton(
                             onClick = { showThemeMenu = true },
@@ -211,8 +178,6 @@ fun NeetHeader(
                                 modifier = Modifier.size(20.dp)
                             )
                         }
-
-
 
                         DropdownMenu(
                             expanded = showThemeMenu,
@@ -254,10 +219,9 @@ fun NeetHeader(
                         }
                     }
 
-                    // Check Answer Prompt helper
                     IconButton(
                         onClick = onCheckAnswerPrompt,
-                        modifier = Modifier.testTag("check_answer_prompt_button")
+                        modifier = Modifier.size(44.dp).testTag("check_answer_prompt_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.Psychology,
@@ -266,16 +230,15 @@ fun NeetHeader(
                         )
                     }
 
-                    // Primary Action: Prominent SEND TO CHATGPT button
                     Button(
                         onClick = onSendToChatGpt,
                         colors = ButtonDefaults.buttonColors(
-                            containerColor = Color(0xFF10A37F), // ChatGPT signature green / emerald
+                            containerColor = Color(0xFF10A37F),
                             contentColor = Color.White
                         ),
                         shape = RoundedCornerShape(16.dp),
                         modifier = Modifier
-                            .padding(end = 4.dp)
+                            .padding(horizontal = 4.dp)
                             .testTag("send_to_chatgpt_primary_button")
                     ) {
                         Icon(
@@ -291,11 +254,10 @@ fun NeetHeader(
                         )
                     }
 
-                    // More Menu
                     Box {
                         IconButton(
                             onClick = { showMoreMenu = true },
-                            modifier = Modifier.testTag("header_more_menu_button")
+                            modifier = Modifier.size(44.dp).testTag("header_more_menu_button")
                         ) {
                             Icon(Icons.Default.MoreVert, contentDescription = "More Options")
                         }
@@ -335,10 +297,9 @@ fun NeetHeader(
                         }
                     }
 
-                    // Settings & Preferences
                     IconButton(
                         onClick = onOpenSettings,
-                        modifier = Modifier.testTag("canvas_settings_button")
+                        modifier = Modifier.size(44.dp).testTag("canvas_settings_button")
                     ) {
                         Icon(
                             imageVector = Icons.Default.Settings,
@@ -346,12 +307,51 @@ fun NeetHeader(
                             tint = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
 
-                    containerColor = MaterialTheme.colorScheme.surface
-                )
-            )
+                    // Keep document metadata available without stealing fixed toolbar width.
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = MaterialTheme.colorScheme.surfaceContainerHighest,
+                        modifier = Modifier
+                            .padding(start = 4.dp, end = 8.dp)
+                            .clickable { showEditInfoDialog = true }
+                            .testTag("document_title_button")
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(Color(document.subject.colorHex))
+                                    .padding(horizontal = 6.dp, vertical = 2.dp)
+                            ) {
+                                Text(
+                                    text = document.subject.displayName,
+                                    color = Color.White,
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "${document.questionNumber}: ${document.title}",
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Icon(
+                                imageVector = Icons.Default.Edit,
+                                contentDescription = "Edit title",
+                                modifier = Modifier.size(13.dp),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
 
             // Sub-row: Page navigation bar
             Row(
